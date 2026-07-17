@@ -22,22 +22,29 @@ struct QuickSwitchSettingsView: View {
                         Image(systemName: "line.3.horizontal")
                             .foregroundStyle(.tertiary)
                         Label(row.title, systemImage: row.icon)
-                            // Dim what ⌥⇥ will skip over, matching the sidebar.
-                            .foregroundStyle(row.isEnabled ? .primary : .secondary)
                         if !row.isEnabled {
-                            Text("Off")
+                            Text("Off in Glances")
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
                         }
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { quickSwitch.isIncluded(row.id) },
+                            // A glance that's off can't be in the ring, so the
+                            // switch reads off however the row is stored. The
+                            // stored value is left alone rather than cleared:
+                            // re-enable the glance on the Glances page and the
+                            // ring it was part of comes back intact.
+                            get: { row.isEnabled && quickSwitch.isIncluded(row.id) },
                             set: { quickSwitch.setIncluded(row.id, $0) }
                         ))
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .disabled(!row.isEnabled)
                     }
+                    // Grays the whole row and blocks the switch; `moveDisabled`
+                    // covers what `disabled` doesn't reach — a List row stays
+                    // draggable otherwise, and a row you can't switch but can
+                    // drag is a strange half-inert thing.
+                    .disabled(!row.isEnabled)
+                    .moveDisabled(!row.isEnabled)
                 }
                 .onMove { offsets, destination in
                     quickSwitch.move(rows.map(\.id), fromOffsets: offsets, toOffset: destination)
@@ -61,7 +68,7 @@ struct QuickSwitchSettingsView: View {
     private var intro: String {
         let key = hotkeys.shortcut(for: .quickSwitch)?.displayString
         let press = key.map { "Press \($0)" } ?? "The Quick Switch shortcut"
-        return "\(press) to open the next glance below; press again to keep going, and it wraps around to the top. Drag to set the order. Glances you've turned off on the Glances page are skipped."
+        return "\(press) to open the next glance below; press again to keep going, and it wraps around to the top. Drag to set the order. A glance you've turned off on the Glances page is grayed out here and can't take part — turn it back on there to use it."
     }
 
     /// Every glance in ring order, whether it's in the ring or not — the page
