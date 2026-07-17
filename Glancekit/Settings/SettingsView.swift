@@ -7,7 +7,8 @@ import SwiftUI
 /// `TabView`, whose tab bar overflowed extra plugins into a `>>` dropdown. A
 /// sidebar list scrolls vertically and stays legible however many plugins are
 /// registered. The first group holds the app-wide pages ("Glances" — toggle +
-/// drag-to-reorder, with the update check below — and "Shortcuts"); the second lists each plugin's own
+/// drag-to-reorder, with the update check above — and "Shortcuts"); the second
+/// lists each plugin's own
 /// `settingsSection()`.
 struct SettingsView: View {
     @Environment(PluginRegistry.self) private var registry
@@ -110,6 +111,10 @@ struct SettingsView: View {
 
     private var glancesPage: some View {
         VStack(alignment: .leading, spacing: 8) {
+            updateRow
+
+            Divider()
+
             Text("Enable and reorder glances. Order controls the popover layout.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -138,10 +143,6 @@ struct SettingsView: View {
                 }
             }
             .frame(minHeight: 300)
-
-            Divider()
-
-            updateRow
         }
     }
 
