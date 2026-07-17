@@ -12,6 +12,7 @@ import Observation
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case quickSwitch = "quickswitch"
     case colors = "colors"
+    case notes = "notes"
     case settings = "settings"
 
     var id: String { rawValue }
@@ -23,6 +24,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .quickSwitch: nil
         case .colors: "colors"
+        case .notes: "notes"
         case .settings: nil
         }
     }
@@ -31,6 +33,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .quickSwitch: "Quick Switch"
         case .colors: "Open Colors"
+        case .notes: "Open Notes"
         case .settings: "Open Settings"
         }
     }
@@ -39,6 +42,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .quickSwitch: "Steps through the glances chosen on the Quick Switch page."
         case .colors: nil
+        case .notes: "Opens the note field ready to type. ⌘↩ saves."
         case .settings: "Opens this window from any app. Press again, or ⎋, to close it."
         }
     }
@@ -47,6 +51,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .quickSwitch: "rectangle.stack"
         case .colors: "eyedropper"
+        case .notes: "note.text"
         case .settings: "gearshape"
         }
     }
@@ -57,6 +62,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
             GlobalShortcut(keyCode: UInt16(kVK_Tab), modifiers: [.option])
         case .colors:
             GlobalShortcut(keyCode: UInt16(kVK_ANSI_1), modifiers: [.option])
+        case .notes:
+            GlobalShortcut(keyCode: UInt16(kVK_ANSI_2), modifiers: [.option])
         case .settings:
             GlobalShortcut(keyCode: UInt16(kVK_ANSI_Grave), modifiers: [.option])
         }
