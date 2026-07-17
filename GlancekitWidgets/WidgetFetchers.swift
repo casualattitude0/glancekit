@@ -29,7 +29,7 @@ enum StockFetcher {
 
     static func fetch(symbols: [String]) async -> [WidgetStockQuote] {
         var out: [WidgetStockQuote] = []
-        for s in symbols.prefix(10) {
+        for s in symbols {
             if let q = await fetchOne(s) { out.append(q) }
         }
         return out
@@ -44,8 +44,14 @@ enum StockFetcher {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let chart = json["chart"] as? [String: Any],
               let results = chart["result"] as? [[String: Any]],
-              let meta = results.first?["meta"] as? [String: Any] else { return nil }
-        let price = (meta["regularMarketPrice"] as? Double) ?? 0
+              let first = results.first,
+              let meta = first["meta"] as? [String: Any] else { return nil }
+        // Match QuoteProvider: fall back to the last intraday close when
+        // regularMarketPrice is absent, instead of showing 0.00 / a bogus %.
+        let closes = ((first["indicators"] as? [String: Any])?["quote"] as? [[String: Any]])?
+            .first?["close"] as? [Any?] ?? []
+        let lastClose = closes.reversed().compactMap { $0 as? Double }.first
+        let price = (meta["regularMarketPrice"] as? Double) ?? lastClose ?? 0
         let prev = (meta["chartPreviousClose"] as? Double) ?? (meta["previousClose"] as? Double) ?? 0
         let pct = prev == 0 ? 0 : (price - prev) / prev * 100
         return WidgetStockQuote(symbol: symbol, price: price, changePercent: pct)
@@ -54,13 +60,43 @@ enum StockFetcher {
 
 // MARK: - GitHub (token supplied via widget config)
 
+struct WidgetGitHubNotification: Identifiable {
+    let id: String
+    let title: String
+    let repo: String
+}
+
+struct WidgetGitHubPullRequest: Identifiable {
+    let id: Int
+    let number: Int
+    let title: String
+    let repo: String
+    /// "success" | "pending" | "failure" | "error", or nil when unknown.
+    let ciState: String?
+}
+
+/// A year of contributions, already padded to 7 rows per week so the heatmap
+/// can draw weekday-aligned columns without re-deriving weekdays in the view.
+struct WidgetGitHubContributions {
+    let total: Int
+    /// One entry per week; each is 7 optional day counts, Sunday…Saturday.
+    let weeks: [[Int?]]
+}
+
 struct WidgetGitHubCounts {
     let unread: Int
     let openPRs: Int
+    var login: String? = nil
+    var notifications: [WidgetGitHubNotification] = []
+    var pullRequests: [WidgetGitHubPullRequest] = []
+    var contributions: WidgetGitHubContributions? = nil
 }
 
 enum GitHubFetcher {
-    static func fetch(token: String?) async -> WidgetGitHubCounts? {
+    /// The small widget only renders the two counts, so it skips the extra
+    /// requests (contribution calendar, per-PR CI status) that the medium and
+    /// large layouts need. `detailed: false` keeps it to two API calls.
+    static func fetch(token: String?, detailed: Bool = false) async -> WidgetGitHubCounts? {
         guard let token, !token.isEmpty else { return nil }
         let headers = [
             "Authorization": "Bearer \(token)",
@@ -68,36 +104,141 @@ enum GitHubFetcher {
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "Glancekit",
         ]
-        async let unread = fetchUnread(headers)
-        async let prs = fetchPRCount(headers)
-        let (u, p) = await (unread, prs)
-        guard u != nil || p != nil else { return nil }
-        return WidgetGitHubCounts(unread: u ?? 0, openPRs: p ?? 0)
+        async let notificationsTask = fetchNotifications(headers)
+        async let contributionsTask = detailed ? await fetchContributions(headers) : nil
+        async let loginTask = fetchLogin(headers)
+
+        let notifications = await notificationsTask
+        var prs: (total: Int, items: [WidgetGitHubPullRequest])?
+        if let login = await loginTask {
+            prs = await fetchPRs(headers, login: login, detailed: detailed)
+        }
+        guard notifications != nil || prs != nil else { return nil }
+
+        return WidgetGitHubCounts(
+            unread: notifications?.count ?? 0,
+            openPRs: prs?.total ?? 0,
+            login: await loginTask,
+            notifications: notifications ?? [],
+            pullRequests: prs?.items ?? [],
+            contributions: await contributionsTask
+        )
     }
 
     private static func get(_ urlStr: String, _ headers: [String: String]) async -> Data? {
         guard let url = URL(string: urlStr) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 15)
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        return await send(req)
+    }
+
+    private static func send(_ req: URLRequest) async -> Data? {
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
         return data
     }
 
-    private static func fetchUnread(_ h: [String: String]) async -> Int? {
+    private static func fetchNotifications(_ h: [String: String]) async -> [WidgetGitHubNotification]? {
         guard let d = await get("https://api.github.com/notifications", h),
               let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return nil }
-        return arr.count
+        // Match GitHubPlugin: only unread notifications, capped at the first 10
+        // the API returns (Array(fetchedNotifications.prefix(10))).
+        return arr.prefix(10).compactMap { item -> WidgetGitHubNotification? in
+            guard (item["unread"] as? Bool) == true,
+                  let id = item["id"] as? String,
+                  let title = (item["subject"] as? [String: Any])?["title"] as? String else { return nil }
+            let repo = (item["repository"] as? [String: Any])?["full_name"] as? String ?? ""
+            return WidgetGitHubNotification(id: id, title: title, repo: repo)
+        }
     }
 
-    private static func fetchPRCount(_ h: [String: String]) async -> Int? {
-        guard let ud = await get("https://api.github.com/user", h),
-              let uj = try? JSONSerialization.jsonObject(with: ud) as? [String: Any],
-              let login = uj["login"] as? String else { return nil }
+    private static func fetchLogin(_ h: [String: String]) async -> String? {
+        guard let d = await get("https://api.github.com/user", h),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        return j["login"] as? String
+    }
+
+    private static func fetchPRs(_ h: [String: String], login: String, detailed: Bool) async -> (total: Int, items: [WidgetGitHubPullRequest])? {
         let q = "is:open is:pr author:\(login)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let d = await get("https://api.github.com/search/issues?q=\(q)", h),
-              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
-        return j["total_count"] as? Int
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let total = j["total_count"] as? Int else { return nil }
+        guard detailed else { return (total, []) }
+
+        // Only the PRs the largest layout can show — each CI status costs two
+        // more API calls, so don't spend rate limit on rows nobody sees.
+        let items = (j["items"] as? [[String: Any]] ?? []).prefix(maxDetailedPRs).compactMap { item -> WidgetGitHubPullRequest? in
+            guard let id = item["id"] as? Int,
+                  let number = item["number"] as? Int,
+                  let title = item["title"] as? String else { return nil }
+            return WidgetGitHubPullRequest(id: id, number: number, title: title, repo: repoFullName(from: item["repository_url"] as? String ?? ""), ciState: nil)
+        }
+
+        let withStatus = await withTaskGroup(of: (Int, String?).self) { group -> [Int: String] in
+            for pr in items {
+                group.addTask { (pr.id, await fetchCIState(h, repo: pr.repo, number: pr.number)) }
+            }
+            var states: [Int: String] = [:]
+            for await (id, state) in group { states[id] = state }
+            return states
+        }
+        return (total, items.map {
+            WidgetGitHubPullRequest(id: $0.id, number: $0.number, title: $0.title, repo: $0.repo, ciState: withStatus[$0.id])
+        })
+    }
+
+    /// Number of PR rows the large layout renders; also the CI-status budget.
+    static let maxDetailedPRs = 4
+
+    /// Matches GitHubAPI.Issue.repoFullName: "owner/repo" out of the API link.
+    private static func repoFullName(from repositoryURL: String) -> String {
+        let parts = repositoryURL.split(separator: "/")
+        guard parts.count >= 2 else { return repositoryURL }
+        return "\(parts[parts.count - 2])/\(parts[parts.count - 1])"
+    }
+
+    private static func fetchCIState(_ h: [String: String], repo: String, number: Int) async -> String? {
+        guard let pd = await get("https://api.github.com/repos/\(repo)/pulls/\(number)", h),
+              let pj = try? JSONSerialization.jsonObject(with: pd) as? [String: Any],
+              let sha = (pj["head"] as? [String: Any])?["sha"] as? String,
+              let sd = await get("https://api.github.com/repos/\(repo)/commits/\(sha)/status", h),
+              let sj = try? JSONSerialization.jsonObject(with: sd) as? [String: Any] else { return nil }
+        return sj["state"] as? String
+    }
+
+    private static func fetchContributions(_ h: [String: String]) async -> WidgetGitHubContributions? {
+        let query = """
+        query { viewer { contributionsCollection { contributionCalendar { \
+        totalContributions weeks { contributionDays { date contributionCount weekday } } } } } }
+        """
+        guard let url = URL(string: "https://api.github.com/graphql"),
+              let body = try? JSONSerialization.data(withJSONObject: ["query": query]) else { return nil }
+        var req = URLRequest(url: url, timeoutInterval: 15)
+        req.httpMethod = "POST"
+        req.httpBody = body
+        for (k, v) in h { req.setValue(v, forHTTPHeaderField: k) }
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Fine-grained tokens without profile read access get a 200 + `errors`
+        // here; the nil-chain below treats that the same as a transport failure
+        // and the heatmap is simply omitted.
+        guard let data = await send(req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let calendar = ((((json["data"] as? [String: Any])?["viewer"] as? [String: Any])?["contributionsCollection"] as? [String: Any])?["contributionCalendar"]) as? [String: Any],
+              let total = calendar["totalContributions"] as? Int,
+              let weeks = calendar["weeks"] as? [[String: Any]] else { return nil }
+
+        let padded = weeks.map { week -> [Int?] in
+            let days = week["contributionDays"] as? [[String: Any]] ?? []
+            // Pad to 7 rows so weekdays line up even on partial weeks.
+            var column = [Int?](repeating: nil, count: 7)
+            for day in days {
+                guard let weekday = day["weekday"] as? Int, (0..<7).contains(weekday) else { continue }
+                column[weekday] = day["contributionCount"] as? Int
+            }
+            return column
+        }
+        return WidgetGitHubContributions(total: total, weeks: padded)
     }
 }
 
@@ -120,7 +261,7 @@ enum EventFetcher {
             .filter { $0.startDate >= now }
             .sorted { $0.startDate < $1.startDate }
         guard let e = events.first else { return nil }
-        return WidgetEvent(title: e.title ?? "Event", date: e.startDate)
+        return WidgetEvent(title: e.title ?? "Untitled event", date: e.startDate)
     }
 }
 
@@ -141,9 +282,16 @@ struct WidgetWeatherDay: Identifiable {
     var id: String { date }
 
     var weekday: String {
-        let formatter = ISO8601DateFormatter()
-        guard let parsed = formatter.date(from: "\(date)T00:00:00Z") else { return date }
-        return parsed.formatted(.dateTime.weekday(.abbreviated))
+        // Match WeatherDay.weekdayLabel: parse the UTC "yyyy-MM-dd" date, then
+        // format an abbreviated weekday ("EEE") in the device's local time zone.
+        let inFormatter = DateFormatter()
+        inFormatter.locale = Locale(identifier: "en_US_POSIX")
+        inFormatter.dateFormat = "yyyy-MM-dd"
+        inFormatter.timeZone = TimeZone(identifier: "UTC")
+        guard let parsed = inFormatter.date(from: date) else { return date }
+        let out = DateFormatter()
+        out.dateFormat = "EEE"
+        return out.string(from: parsed)
     }
 
     var symbolName: String { WidgetWeatherCode.symbol(for: code) }
@@ -155,7 +303,7 @@ enum WeatherFetcher {
         let lon = longitude.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let latValue = Double(lat), let lonValue = Double(lon),
               (-90...90).contains(latValue), (-180...180).contains(lonValue) else {
-            return WidgetWeather(temperature: nil, forecast: [], error: "Enter a valid latitude and longitude")
+            return WidgetWeather(temperature: nil, forecast: [], error: "Enter a valid latitude (−90…90) and longitude (−180…180) in Settings.")
         }
 
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
@@ -247,7 +395,7 @@ enum CustomAPIFetcher {
             return WidgetCustomAPIResult(label: displayLabel, value: nil, error: "Enter a valid URL")
         }
 
-        var request = URLRequest(url: url, timeoutInterval: 20)
+        var request = URLRequest(url: url, timeoutInterval: 15)
         for (name, value) in headers(from: headersText ?? "") {
             request.setValue(value, forHTTPHeaderField: name)
         }
@@ -261,7 +409,7 @@ enum CustomAPIFetcher {
                 return WidgetCustomAPIResult(label: displayLabel, value: nil, error: "Response is not valid JSON")
             }
             guard let value = WidgetJSONPath.evaluate(path: jsonPath, in: json) else {
-                return WidgetCustomAPIResult(label: displayLabel, value: nil, error: "Path not found")
+                return WidgetCustomAPIResult(label: displayLabel, value: nil, error: "Path \"\(jsonPath)\" not found")
             }
             return WidgetCustomAPIResult(label: displayLabel, value: value, error: nil)
         } catch {
@@ -343,9 +491,13 @@ enum WidgetJSONPath {
         case is NSNull:
             return "null"
         case let object as [String: Any]:
-            return (try? JSONSerialization.data(withJSONObject: object)).flatMap { String(data: $0, encoding: .utf8) }
+            if let data = try? JSONSerialization.data(withJSONObject: object),
+               let string = String(data: data, encoding: .utf8) { return string }
+            return "{…}"
         case let array as [Any]:
-            return (try? JSONSerialization.data(withJSONObject: array)).flatMap { String(data: $0, encoding: .utf8) }
+            if let data = try? JSONSerialization.data(withJSONObject: array),
+               let string = String(data: data, encoding: .utf8) { return string }
+            return "[…]"
         default:
             return "\(value)"
         }
@@ -360,6 +512,7 @@ struct WidgetSystemStats {
     let totalMemory: UInt64?
     let batteryPercent: Int?
     let isCharging: Bool
+    let batteryTimeRemainingMinutes: Int?
     let diskFree: Int64?
     let downloadRate: Double?
     let uploadRate: Double?
@@ -396,6 +549,7 @@ enum SystemStatsFetcher {
             totalMemory: memory?.total,
             batteryPercent: battery?.percent,
             isCharging: battery?.isCharging ?? false,
+            batteryTimeRemainingMinutes: battery?.timeRemaining,
             diskFree: diskFreeBytes(),
             downloadRate: throughput(before: firstNetwork, after: secondNetwork, received: true),
             uploadRate: throughput(before: firstNetwork, after: secondNetwork, received: false),
@@ -441,7 +595,7 @@ enum SystemStatsFetcher {
         return (min(used, total), total)
     }
 
-    private static func batteryInfo() -> (percent: Int, isCharging: Bool)? {
+    private static func batteryInfo() -> (percent: Int, isCharging: Bool, timeRemaining: Int?)? {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
         for source in sources {
@@ -449,7 +603,13 @@ enum SystemStatsFetcher {
                   let current = description[kIOPSCurrentCapacityKey] as? Int,
                   let maximum = description[kIOPSMaxCapacityKey] as? Int,
                   maximum > 0 else { continue }
-            return (Int((Double(current) / Double(maximum) * 100).rounded()), description[kIOPSIsChargingKey] as? Bool ?? false)
+            var minutesRemaining: Int?
+            if let timeToEmpty = description[kIOPSTimeToEmptyKey] as? Int, timeToEmpty > 0 {
+                minutesRemaining = timeToEmpty
+            } else if let timeToFull = description[kIOPSTimeToFullChargeKey] as? Int, timeToFull > 0 {
+                minutesRemaining = timeToFull
+            }
+            return (Int((Double(current) / Double(maximum) * 100).rounded()), description[kIOPSIsChargingKey] as? Bool ?? false, minutesRemaining)
         }
         return nil
     }
@@ -535,7 +695,15 @@ enum PhotoFetcher {
             options: requestOptions
         ) { result, _ in image = result }
 
-        let caption = asset.creationDate?.formatted(date: .abbreviated, time: .omitted)
+        // Match PhotoSource caption: medium date style, else the asset id.
+        let caption: String
+        if let date = asset.creationDate {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            caption = formatter.string(from: date)
+        } else {
+            caption = asset.localIdentifier
+        }
         return WidgetPhoto(imageData: image?.tiffRepresentation, caption: caption, isAuthorized: true)
     }
 }

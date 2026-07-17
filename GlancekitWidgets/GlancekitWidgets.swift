@@ -176,17 +176,43 @@ struct GitHubEntry: TimelineEntry {
 
 struct GitHubProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> GitHubEntry {
-        GitHubEntry(date: Date(), counts: WidgetGitHubCounts(unread: 3, openPRs: 2), configured: true)
+        GitHubEntry(date: Date(), counts: .preview, configured: true)
     }
     func snapshot(for configuration: GitHubConfigIntent, in context: Context) async -> GitHubEntry {
         let configured = !(configuration.token ?? "").isEmpty
-        return GitHubEntry(date: Date(), counts: await GitHubFetcher.fetch(token: configuration.token), configured: configured)
+        let counts = await GitHubFetcher.fetch(token: configuration.token, detailed: context.family != .systemSmall)
+        return GitHubEntry(date: Date(), counts: counts, configured: configured)
     }
     func timeline(for configuration: GitHubConfigIntent, in context: Context) async -> Timeline<GitHubEntry> {
         let configured = !(configuration.token ?? "").isEmpty
-        let counts = await GitHubFetcher.fetch(token: configuration.token)
+        let counts = await GitHubFetcher.fetch(token: configuration.token, detailed: context.family != .systemSmall)
         let next = Calendar.current.date(byAdding: .minute, value: 20, to: Date()) ?? Date()
         return Timeline(entries: [GitHubEntry(date: Date(), counts: counts, configured: configured)], policy: .after(next))
+    }
+}
+
+private extension WidgetGitHubCounts {
+    /// Gallery/placeholder sample: the widget can't hit the API there, and an
+    /// empty shell would misrepresent what the layouts actually show.
+    static var preview: WidgetGitHubCounts {
+        WidgetGitHubCounts(
+            unread: 3,
+            openPRs: 2,
+            login: "octocat",
+            notifications: [
+                WidgetGitHubNotification(id: "1", title: "Review requested: caching layer", repo: "acme/api"),
+                WidgetGitHubNotification(id: "2", title: "CI failed on main", repo: "acme/web"),
+                WidgetGitHubNotification(id: "3", title: "New comment on #412", repo: "acme/docs"),
+            ],
+            pullRequests: [
+                WidgetGitHubPullRequest(id: 1, number: 128, title: "Add widget timeline refresh", repo: "acme/web", ciState: "success"),
+                WidgetGitHubPullRequest(id: 2, number: 131, title: "Fix token keychain migration", repo: "acme/api", ciState: "pending"),
+            ],
+            contributions: WidgetGitHubContributions(
+                total: 1_284,
+                weeks: (0..<53).map { week in (0..<7).map { day in (week * 7 + day) % 5 } }
+            )
+        )
     }
 }
 
@@ -199,36 +225,210 @@ struct GitHubWidget: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("GitHub")
-        .description("Unread notifications and open PRs. Edit the widget to add a token.")
-        .supportedFamilies([.systemSmall])
+        .description("Notifications, open PRs, and your contribution graph. Edit the widget to add a token.")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
 private struct GitHubWidgetView: View {
     let entry: GitHubEntry
+    @Environment(\.widgetFamily) private var family
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
-                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            if let g = entry.counts {
-                HStack(spacing: 6) {
-                    Image(systemName: "bell.badge")
-                    Text("\(g.unread)").font(.title2.weight(.semibold).monospacedDigit())
-                    Text("unread").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                if family != .systemSmall, let login = entry.counts?.login {
+                    Spacer()
+                    Text("@\(login)")
                 }
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.pull")
-                    Text("\(g.openPRs)").font(.title2.weight(.semibold).monospacedDigit())
-                    Text("open PRs").font(.caption).foregroundStyle(.secondary)
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            if let counts = entry.counts {
+                switch family {
+                case .systemSmall: small(counts)
+                case .systemMedium: medium(counts)
+                default: large(counts)
                 }
-            } else if !entry.configured {
-                Text("Edit widget to add a GitHub token").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Couldn't load — check token").font(.caption).foregroundStyle(.orange)
+                Spacer(minLength: 0)
+                if entry.configured {
+                    Text("Couldn't load — check token").font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("Edit widget to add a GitHub token").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            UpdatedFooter(date: entry.date)
+        }
+    }
+
+    // MARK: Small — the two counts only.
+
+    @ViewBuilder
+    private func small(_ counts: WidgetGitHubCounts) -> some View {
+        Spacer(minLength: 0)
+        HStack(spacing: 6) {
+            Image(systemName: "bell.badge")
+            Text("\(counts.unread)").font(.title2.weight(.semibold).monospacedDigit())
+            Text("unread").font(.caption).foregroundStyle(.secondary)
+        }
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.pull")
+            Text("\(counts.openPRs)").font(.title2.weight(.semibold).monospacedDigit())
+            Text("open PRs").font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 0)
+    }
+
+    // MARK: Medium — counts, heatmap, and the top PR.
+
+    @ViewBuilder
+    private func medium(_ counts: WidgetGitHubCounts) -> some View {
+        GitHubCountsRow(counts: counts)
+        if let contributions = counts.contributions {
+            ContributionHeatmap(contributions: contributions, cell: 4)
+        }
+        Spacer(minLength: 0)
+        if let pr = counts.pullRequests.first {
+            GitHubPRRow(pr: pr)
+        } else if let note = counts.notifications.first {
+            GitHubNotificationRow(note: note)
+        }
+    }
+
+    // MARK: Large — counts, heatmap, PRs, and notifications.
+
+    @ViewBuilder
+    private func large(_ counts: WidgetGitHubCounts) -> some View {
+        GitHubCountsRow(counts: counts)
+        if let contributions = counts.contributions {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(contributions.total) contributions in the last year")
+                    .font(.caption.weight(.semibold))
+                ContributionHeatmap(contributions: contributions, cell: 5)
+            }
+        }
+        GitHubSection(title: "My PRs", isEmpty: counts.pullRequests.isEmpty, emptyText: "No open pull requests") {
+            ForEach(counts.pullRequests) { GitHubPRRow(pr: $0) }
+        }
+        GitHubSection(title: "Notifications", isEmpty: counts.notifications.isEmpty, emptyText: "No unread notifications") {
+            ForEach(counts.notifications.prefix(4)) { GitHubNotificationRow(note: $0) }
+        }
+        Spacer(minLength: 0)
+    }
+}
+
+private struct GitHubCountsRow: View {
+    let counts: WidgetGitHubCounts
+
+    var body: some View {
+        HStack(spacing: 14) {
+            metric(icon: "bell.badge", value: counts.unread, label: "unread")
+            metric(icon: "arrow.triangle.pull", value: counts.openPRs, label: "open PRs")
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func metric(icon: String, value: Int, label: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption)
+            Text("\(value)").font(.title3.weight(.semibold).monospacedDigit())
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct GitHubSection<Content: View>: View {
+    let title: String
+    let isEmpty: Bool
+    let emptyText: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption.weight(.semibold))
+            if isEmpty {
+                Text(emptyText).font(.caption2).foregroundStyle(.secondary)
+            } else {
+                content
+            }
+        }
+    }
+}
+
+private struct GitHubPRRow: View {
+    let pr: WidgetGitHubPullRequest
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(ciColor).frame(width: 7, height: 7)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(pr.title).font(.caption).lineLimit(1)
+                Text("\(pr.repo) #\(pr.number)").font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            UpdatedFooter(date: entry.date)
+        }
+    }
+
+    // Matches GitHubPlugin.ciColor.
+    private var ciColor: Color {
+        switch pr.ciState {
+        case "success": return .green
+        case "pending": return .yellow
+        case "failure", "error": return .red
+        default: return .gray
+        }
+    }
+}
+
+private struct GitHubNotificationRow: View {
+    let note: WidgetGitHubNotification
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(Color.blue).frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(note.title).font(.caption).lineLimit(1)
+                Text(note.repo).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// GitHub-style contribution heatmap: one column per week, one cell per day.
+/// Mirrors the popover's heatmap, but sized for the wider widget column.
+private struct ContributionHeatmap: View {
+    let contributions: WidgetGitHubContributions
+    let cell: CGFloat
+
+    private let gap: CGFloat = 1
+
+    var body: some View {
+        HStack(alignment: .top, spacing: gap) {
+            ForEach(Array(contributions.weeks.enumerated()), id: \.offset) { _, week in
+                VStack(spacing: gap) {
+                    ForEach(0..<7, id: \.self) { weekday in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(color(for: week[weekday]))
+                            .frame(width: cell, height: cell)
+                    }
+                }
+            }
+        }
+    }
+
+    // Matches GitHubPlugin's ramp: absent/empty days are faint, then green.
+    private func color(for count: Int?) -> Color {
+        switch count {
+        case .none, .some(0): return .gray.opacity(0.15)
+        case .some(1...2): return .green.opacity(0.4)
+        case .some(3...5): return .green.opacity(0.6)
+        case .some(6...9): return .green.opacity(0.8)
+        default: return .green
         }
     }
 }
@@ -250,6 +450,7 @@ struct SystemStatsProvider: TimelineProvider {
                 totalMemory: 17_179_869_184,
                 batteryPercent: 82,
                 isCharging: false,
+                batteryTimeRemainingMinutes: 184,
                 diskFree: 245_672_468_480,
                 downloadRate: 312_000,
                 uploadRate: 54_000,
@@ -296,10 +497,10 @@ private struct SystemStatsWidgetView: View {
             SystemMetricRow(icon: "cpu", label: "CPU", value: entry.stats.cpuPercent.map { String(format: "%.0f%%", $0) } ?? "—")
             SystemMetricRow(icon: "memorychip", label: "RAM", value: memoryText)
             SystemMetricRow(icon: "battery.100", label: "Battery", value: batteryText)
-            SystemMetricRow(icon: "internaldrive", label: "Disk", value: entry.stats.diskFree.map { "\(formatBytes($0)) free" } ?? "—")
+            SystemMetricRow(icon: "internaldrive", label: "Disk", value: entry.stats.diskFree.map { String(format: "%.1f GB free", Double($0) / 1_073_741_824) } ?? "—")
             if family == .systemMedium {
                 SystemMetricRow(icon: "arrow.up.arrow.down.circle", label: "Network", value: networkText)
-                SystemMetricRow(icon: "lock.shield", label: "VPN", value: entry.stats.vpnActive.map { $0 ? "On" : "Off" } ?? "—")
+                SystemMetricRow(icon: "lock.shield", label: "VPN", value: entry.stats.vpnActive.map { $0 ? "Connected" : "Off" } ?? "—")
                 SystemMetricRow(icon: "clock.arrow.circlepath", label: "Uptime", value: formatUptime(entry.stats.uptime))
             }
             Spacer(minLength: 0)
@@ -314,7 +515,12 @@ private struct SystemStatsWidgetView: View {
 
     private var batteryText: String {
         guard let percent = entry.stats.batteryPercent else { return "—" }
-        return "\(percent)%\(entry.stats.isCharging ? " charging" : "")"
+        var text = "\(percent)%"
+        if entry.stats.isCharging { text += " ⚡" }
+        if let minutes = entry.stats.batteryTimeRemainingMinutes {
+            text += " (\(minutes / 60)h\(minutes % 60)m)"
+        }
+        return text
     }
 
     private var networkText: String {
@@ -322,20 +528,26 @@ private struct SystemStatsWidgetView: View {
         return "↓\(formatRate(down)) ↑\(formatRate(up))"
     }
 
+    // Matches SystemStatsPlugin.formatBytes: "%.1fG" (no space, single "G").
     private func formatBytes(_ bytes: Int64) -> String {
-        String(format: "%.1f GB", Double(bytes) / 1_073_741_824)
+        String(format: "%.1fG", Double(bytes) / 1_073_741_824)
     }
 
+    // Matches SystemStatsPlugin.formatRate: no space before the unit.
     private func formatRate(_ bytes: Double) -> String {
         let kilobytes = bytes / 1024
-        return kilobytes < 1024 ? String(format: "%.0f KB/s", kilobytes) : String(format: "%.1f MB/s", kilobytes / 1024)
+        return kilobytes < 1024 ? String(format: "%.0fKB/s", kilobytes) : String(format: "%.1fMB/s", kilobytes / 1024)
     }
 
+    // Matches SystemStatsPlugin.formatUptime: "Xd Yh" / "Xh Ym" / "Xm".
     private func formatUptime(_ seconds: TimeInterval) -> String {
-        let minutes = Int(seconds) / 60
-        let days = minutes / (24 * 60)
-        let hours = (minutes / 60) % 24
-        return days > 0 ? "\(days)d \(hours)h" : "\(hours)h \(minutes % 60)m"
+        let totalMinutes = Int(seconds) / 60
+        let days = totalMinutes / (24 * 60)
+        let hours = (totalMinutes / 60) % 24
+        let minutes = totalMinutes % 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
     }
 }
 
