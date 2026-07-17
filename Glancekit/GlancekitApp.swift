@@ -5,6 +5,7 @@ struct GlancekitApp: App {
     @State private var registry: PluginRegistry
     @State private var coordinator: RefreshCoordinator
     @State private var updater = UpdateChecker()
+    @State private var hotkeys: HotkeyCenter
 
     init() {
         let registry = PluginRegistry()
@@ -16,20 +17,32 @@ struct GlancekitApp: App {
         //   registry.register(PhotosPlugin())
         //   registry.register(GitHubPlugin())
         //   registry.register(CustomAPIPlugin())
-        //   registry.register(ColorPickerPlugin())
+        //   registry.register(ColorsPlugin())
         registry.register(StocksPlugin())
         registry.register(SystemStatsPlugin())
         registry.register(TimeProductivityPlugin())
         registry.register(PhotosPlugin())
         registry.register(GitHubPlugin())
         registry.register(CustomAPIPlugin())
-        registry.register(ColorPickerPlugin())
-        registry.register(ColorPalettePlugin())
+        registry.register(ColorsPlugin())
         registry.register(WeatherPlugin())
+        // ──────────────────────────────────────────────────────────────────
+
+        // ── Global shortcuts ──────────────────────────────────────────────
+        // Each action toggles its glance's tool window open at the mouse (⇧⌘1
+        // by default; rebindable on the Shortcuts settings page).
+        let hotkeys = HotkeyCenter()
+        for action in ShortcutAction.allCases {
+            hotkeys.setHandler(for: action) {
+                guard let plugin = registry.plugin(id: action.pluginID) else { return }
+                ToolWindowManager.shared.toggle(plugin: plugin)
+            }
+        }
         // ──────────────────────────────────────────────────────────────────
 
         _registry = State(initialValue: registry)
         _coordinator = State(initialValue: RefreshCoordinator(registry: registry))
+        _hotkeys = State(initialValue: hotkeys)
     }
 
     var body: some Scene {
@@ -51,6 +64,7 @@ struct GlancekitApp: App {
             SettingsView()
                 .environment(registry)
                 .environment(coordinator)
+                .environment(hotkeys)
         }
 
         // Standalone first-run window. Opened once on launch by MenuBarLabelView;
