@@ -175,7 +175,14 @@ struct SettingsView: View {
             }
             .disabled(isUpdateBusy)
 
-            if isUpdateBusy {
+            // A determinate bar only once the server has told us how many bytes
+            // are coming; a spinner covers the check and the sizeless download,
+            // where there is no fraction to draw.
+            if case .downloading(let progress?) = updater.phase {
+                ProgressView(value: progress)
+                    .controlSize(.small)
+                    .frame(width: 90)
+            } else if isUpdateBusy {
                 ProgressView()
                     .controlSize(.small)
             }
@@ -199,6 +206,9 @@ struct SettingsView: View {
         switch updater.phase {
         case .idle: return "Version \(updater.currentVersion)"
         case .checking: return "Checking for updates…"
+        // No percentage when the response carried no Content-Length: the bytes
+        // are arriving, but nothing here knows how many are left.
+        case .downloading(let progress?): return "Downloading update… \(Int(progress * 100))%"
         case .downloading: return "Downloading update…"
         case .upToDate: return "You're on the latest version (\(updater.currentVersion))"
         case .downloaded(let url): return "Downloaded to \(url.lastPathComponent)"
