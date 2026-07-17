@@ -82,7 +82,7 @@ private struct YahooChartResponse: Decodable {
 
 // MARK: - Finnhub (key required, more reliable)
 
-/// Uses Finnhub's `/quote` endpoint. Requires an API key stored in Keychain
+/// Uses Finnhub's `/quote` endpoint. Requires an API key stored in `CredentialStore`
 /// under `finnhub.apiKey`. No intraday series (keeps the free tier light), so
 /// sparklines are empty for Finnhub-sourced quotes.
 struct FinnhubQuoteProvider: QuoteProvider {
