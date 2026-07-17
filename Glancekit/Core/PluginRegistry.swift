@@ -37,6 +37,47 @@ final class PluginRegistry {
         } else {
             enabledIDs = [] // seeded on first register() call below
         }
+        migrateColorGlances()
+    }
+
+    // MARK: - Migrations
+
+    /// One-shot: the "colorpicker" and "colorpalette" glances merged into a
+    /// single "colors" glance. Carries the retired ids' state onto the new one
+    /// and prunes them, so the merged glance lands in the same slot and stays
+    /// visible for anyone who had either half enabled.
+    ///
+    /// Stale ids in `orderedIDs` are harmless on their own (`orderedPlugins`
+    /// resolves against registered plugins), but "colors" would be missing from
+    /// `enabledIDs` entirely — and `register()` only seeds enabled state on a
+    /// first-ever launch, so without this the merged glance would silently be
+    /// off for every existing user.
+    private func migrateColorGlances() {
+        let migrationKey = "glancekit.migration.colors"
+        guard !defaults.bool(forKey: migrationKey) else { return }
+        defaults.set(true, forKey: migrationKey)
+
+        let retired = ["colorpicker", "colorpalette"]
+        let merged = "colors"
+
+        // Fresh install: nothing to carry over. Returning before `persist()`
+        // matters — writing the (empty) keys here would make `register()` think
+        // this isn't a first launch and skip seeding every glance on.
+        guard orderedIDs.contains(where: retired.contains)
+                || enabledIDs.contains(where: retired.contains)
+        else { return }
+
+        if !orderedIDs.contains(merged),
+           let slot = orderedIDs.firstIndex(where: retired.contains) {
+            orderedIDs.insert(merged, at: slot)
+        }
+        // Either half being on is enough: the merged tool does both jobs.
+        if enabledIDs.contains(where: retired.contains) { enabledIDs.insert(merged) }
+
+        orderedIDs.removeAll { retired.contains($0) }
+        enabledIDs.subtract(retired)
+
+        persist()
     }
 
     /// Register a plugin. Call once per plugin during app startup.

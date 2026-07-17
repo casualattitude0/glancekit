@@ -5,9 +5,7 @@ import Observation
 ///
 /// - Data source: `YahooQuoteProvider` (keyless) by default; switches to
 ///   `FinnhubQuoteProvider` automatically when a Finnhub key is present in
-///   Keychain under `finnhub.apiKey`.
-/// - Menu-bar: contributes a compact "AAPL 227.50 ▲0.8%" summary for the
-///   currently-highlighted symbol (the label view rotates across all glances).
+///   `CredentialStore` under `finnhub.apiKey`.
 /// - Popover: per-symbol rows with price, % change, and an intraday sparkline.
 ///
 /// This is the reference implementation cited in `Core/PLUGIN_CONTRACT.md`.
@@ -34,12 +32,6 @@ final class StocksPlugin: GlancePlugin {
     }
 
     // MARK: GlancePlugin
-
-    var menuBarSummary: String? {
-        guard let q = quotes.first else { return nil }
-        let arrow = q.isUp ? "▲" : "▼"
-        return String(format: "%@ %.2f %@%.2f%%", q.symbol, q.price, arrow, abs(q.changePercent))
-    }
 
     func refresh() async {
         let provider: QuoteProvider
@@ -181,7 +173,7 @@ private struct StocksSettings: View {
 
             Text("Finnhub API key (optional)")
                 .font(.headline)
-            Text("Provide a key for more reliable quotes. Stored in your Keychain. Leave blank to use the keyless Yahoo source.")
+            Text("Provide a key for more reliable quotes. Stored in Glancekit's credentials file, not in app preferences. Leave blank to use the keyless Yahoo source.")
                 .font(.caption).foregroundStyle(.secondary)
             SecureField("Finnhub API key", text: $finnhubKey)
                 .textFieldStyle(.roundedBorder)

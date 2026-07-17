@@ -93,37 +93,6 @@ final class SystemStatsPlugin: GlancePlugin {
 
     // MARK: GlancePlugin
 
-    var menuBarSummary: String? {
-        guard let first = Metric.allCases.first(where: { isEnabled($0) }) else { return nil }
-        switch first {
-        case .cpu:
-            guard let v = cpuUsagePercent else { return nil }
-            return String(format: "CPU %.0f%%", v)
-        case .ram:
-            guard let used = memoryUsedBytes else { return nil }
-            return String(format: "RAM %.1fG", Double(used) / 1_073_741_824)
-        case .battery:
-            guard let b = batteryInfo else { return nil }
-            return "Batt \(b.percentage)%\(b.isCharging ? "⚡" : "")"
-        case .disk:
-            guard let free = diskFreeBytes else { return nil }
-            return String(format: "Disk %.0fG", Double(free) / 1_073_741_824)
-        case .network:
-            guard let down = networkDownBytesPerSec, let up = networkUpBytesPerSec else { return nil }
-            return "↓\(Self.formatRate(down)) ↑\(Self.formatRate(up))"
-        case .vpn:
-            guard let active = vpnActive else { return nil }
-            return active ? "VPN on" : "VPN off"
-        case .bluetooth:
-            guard let device = bluetoothDevices.first else { return "BT —" }
-            if let pct = device.batteryPercent { return "\(device.name) \(pct)%" }
-            return "\(device.name) —"
-        case .uptime:
-            guard let seconds = uptimeSeconds else { return nil }
-            return "Up \(Self.formatUptime(seconds))"
-        }
-    }
-
     func refresh() async {
         // CPU: needs a delta between two tick snapshots.
         if let ticks = SystemMetrics.readCPUTicks() {

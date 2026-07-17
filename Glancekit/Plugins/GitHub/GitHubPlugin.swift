@@ -5,11 +5,9 @@ import Observation
 /// user, and a best-effort CI status dot per PR — for one or more accounts.
 ///
 /// - Auth: one fine-grained Personal Access Token per account, pasted in
-///   Settings and stored in Keychain under `"github.pat.<uuid>"` via
+///   Settings and stored in `CredentialStore` under `"github.pat.<uuid>"` via
 ///   `CredentialStore`. Account metadata (id + label) lives in `UserDefaults`
-///   via `GitHubAccountStore`; tokens never leave the Keychain.
-/// - Menu-bar: total unread across all accounts, e.g. "GH 3●"; `nil` when there
-///   are no accounts or the total is zero.
+///   via `GitHubAccountStore`; tokens never reach app preferences.
 /// - Popover: per-account Contributions + Notifications + My PRs sections, or a
 ///   friendly prompt to add an account when none are configured.
 @MainActor
@@ -47,13 +45,6 @@ final class GitHubPlugin: GlancePlugin {
     }
 
     // MARK: GlancePlugin
-
-    var menuBarSummary: String? {
-        guard !accountData.isEmpty else { return nil }
-        let count = accountData.reduce(0) { $0 + $1.unreadCount }
-        guard count > 0 else { return nil }
-        return "GH \(count)●"
-    }
 
     func refresh() async {
         reloadAccounts()
@@ -314,7 +305,7 @@ private struct GitHubSettings: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("GitHub Accounts")
                 .font(.headline)
-            Text("Add one or more accounts. Create a fine-grained token at github.com/settings/tokens with read-only access to: Notifications, Pull requests, Checks (or Commit statuses), and Metadata. Tokens are stored in your Keychain, never in app preferences.")
+            Text("Add one or more accounts. Create a fine-grained token at github.com/settings/tokens with read-only access to: Notifications, Pull requests, Checks (or Commit statuses), and Metadata. Tokens are stored in Glancekit's credentials file (readable only by your macOS account), never in app preferences.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -342,9 +333,9 @@ private struct GitHubSettings: View {
                         let account = GitHubAccountStore.add(label: newLabel, token: newToken)
                         addFailed = !newToken.isEmpty && !GitHubAccountStore.hasToken(account)
                         if addFailed {
-                            // The Keychain write failed — roll the account back.
+                            // The credential write failed — roll the account back.
                             GitHubAccountStore.remove(account)
-                            addNote = "Couldn't save to Keychain (\(CredentialStore.lastStatus))."
+                            addNote = "Couldn't save credentials (\(CredentialStore.lastStatus))."
                         } else {
                             addNote = "Added."
                             newLabel = ""
@@ -415,7 +406,7 @@ private struct GitHubAccountRow: View {
                 Button("Update") {
                     let ok = GitHubAccountStore.setToken(replacementToken, for: account)
                     noteIsError = !ok
-                    note = ok ? "Updated." : "Couldn't save to Keychain (\(CredentialStore.lastStatus))."
+                    note = ok ? "Updated." : "Couldn't save credentials (\(CredentialStore.lastStatus))."
                     if ok {
                         replacementToken = ""
                         Task { await plugin.refresh() }

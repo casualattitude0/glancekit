@@ -2,11 +2,8 @@ import SwiftUI
 
 /// The single contract every Glancekit tool ("glance") conforms to.
 ///
-/// A glance contributes two surfaces:
-///   - a compact `menuBarSummary` string shown (rotated with the others) in the
-///     macOS status bar, and
-///   - a rich `popoverSection()` view shown in the popover window when the user
-///     clicks the menu-bar item.
+/// A glance contributes a rich `popoverSection()` view, shown in the popover
+/// window when the user clicks the menu-bar item.
 ///
 /// Plugins are reference types marked `@Observable` (Observation framework) so
 /// SwiftUI views re-render automatically when their data changes after a
@@ -27,10 +24,6 @@ protocol GlancePlugin: AnyObject {
     /// Desired auto-refresh cadence in seconds. Return 0 to opt out of the
     /// shared refresh loop (e.g. purely event-driven or on-demand glances).
     var refreshInterval: TimeInterval { get }
-
-    /// Compact text this glance contributes to the rotating status-bar readout.
-    /// Return `nil` to contribute nothing to the bar (popover-only glance).
-    var menuBarSummary: String? { get }
 
     /// Fetch/recompute this glance's data. Called on the main actor by the
     /// `RefreshCoordinator`. Must not throw — handle and surface errors
@@ -53,6 +46,5 @@ protocol GlancePlugin: AnyObject {
 extension GlancePlugin {
     func settingsSection() -> AnyView { AnyView(EmptyView()) }
     var refreshInterval: TimeInterval { 0 }
-    var menuBarSummary: String? { nil }
     var requiredPermissions: [GlancePermission] { [] }
 }

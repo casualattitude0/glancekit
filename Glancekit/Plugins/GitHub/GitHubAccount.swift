@@ -5,7 +5,7 @@ import Observation
 ///
 /// Only non-secret metadata (a stable `id` and a user-facing `label`) is
 /// persisted — to `UserDefaults` via `GitHubAccountStore`. The account's token
-/// lives in the Keychain under `tokenKey`, never in preferences.
+/// lives in `CredentialStore` under `tokenKey`, never in preferences.
 struct GitHubAccount: Identifiable, Codable, Equatable {
     let id: UUID
     var label: String
@@ -15,12 +15,12 @@ struct GitHubAccount: Identifiable, Codable, Equatable {
         self.label = label
     }
 
-    /// Per-account Keychain key, e.g. "github.pat.<uuid>".
+    /// Per-account credential key, e.g. "github.pat.<uuid>".
     var tokenKey: String { "github.pat.\(id.uuidString)" }
 }
 
 /// Persistence for the account list (metadata in `UserDefaults`, tokens in the
-/// Keychain), plus a one-time migration from the original single-token layout.
+/// `CredentialStore`), plus a one-time migration from the original single-token layout.
 enum GitHubAccountStore {
     private static let defaultsKey = "github.accounts"
     private static let legacyTokenKey = "github.pat"

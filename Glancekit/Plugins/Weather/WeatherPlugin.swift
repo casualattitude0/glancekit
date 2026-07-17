@@ -41,11 +41,6 @@ final class WeatherPlugin: GlancePlugin {
 
     // MARK: GlancePlugin
 
-    var menuBarSummary: String? {
-        guard let temp = current?.temperature else { return nil }
-        return "\(Int(temp.rounded()))°"
-    }
-
     func refresh() async {
         let lat = latitude.trimmingCharacters(in: .whitespaces)
         let lon = longitude.trimmingCharacters(in: .whitespaces)

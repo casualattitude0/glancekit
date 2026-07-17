@@ -13,15 +13,14 @@ protocol GlancePlugin: AnyObject {
     var title: String { get }              // shown in Settings + popover header
     var iconSystemName: String { get }     // SF Symbol
     var refreshInterval: TimeInterval { get }  // seconds; 0 = refresh once on start only
-    var menuBarSummary: String? { get }    // compact status-bar text; nil = popover-only
     func refresh() async                   // fetch/recompute; never throws — store errors internally
     func popoverSection() -> AnyView       // rich popover content
     func settingsSection() -> AnyView      // per-glance settings (defaults to empty)
 }
 ```
 
-Defaults exist for `refreshInterval` (0), `menuBarSummary` (nil), and
-`settingsSection()` (empty) — override only what you need.
+Defaults exist for `refreshInterval` (0) and `settingsSection()` (empty) —
+override only what you need.
 
 ## Rules (non-negotiable)
 
@@ -61,8 +60,6 @@ final class ExamplePlugin: GlancePlugin {
 
     private(set) var lastError: String?
     // ... your @Observable state ...
-
-    var menuBarSummary: String? { /* compact text or nil */ nil }
 
     func refresh() async {
         do { /* fetch via NetworkClient; update state */ }
