@@ -37,6 +37,10 @@ final class PhotosPlugin: GlancePlugin {
     private(set) var lastError: String?
     private(set) var photosAuthStatus: PHAuthorizationStatus = .notDetermined
 
+    /// The folder currently bookmarked for `.folder` mode, or nil if none is
+    /// chosen. Mirrors the persisted bookmark so Settings can render and clear it.
+    private(set) var folderURL: URL?
+
     init() {
         if let raw = UserDefaults.standard.string(forKey: Self.sourceKey),
            let kind = PhotoSourceKind(rawValue: raw) {
@@ -47,6 +51,7 @@ final class PhotosPlugin: GlancePlugin {
         let savedInterval = UserDefaults.standard.double(forKey: Self.intervalKey)
         slideInterval = savedInterval > 0 ? savedInterval : 5
         photosAuthStatus = LibraryPhotoLoader.authorizationStatus
+        folderURL = FolderPhotoLoader.resolveBookmarkedFolder()
     }
 
     /// Re-reads the current Photos authorization status (called from Settings).
@@ -118,6 +123,15 @@ final class PhotosPlugin: GlancePlugin {
         panel.prompt = "Choose"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         FolderPhotoLoader.saveBookmark(for: url)
+        folderURL = FolderPhotoLoader.resolveBookmarkedFolder()
+        Task { await refresh() }
+    }
+
+    /// Forgets the chosen folder and empties the slideshow. The folder on disk
+    /// is left alone; the user can pick it again at any time.
+    func clearFolder() {
+        FolderPhotoLoader.clearBookmark()
+        folderURL = nil
         Task { await refresh() }
     }
 
@@ -206,7 +220,21 @@ private struct PhotosSettings: View {
 
             switch plugin.source {
             case .folder:
-                Button("Choose folder…") { plugin.chooseFolder() }
+                if let folder = plugin.folderURL {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(.secondary)
+                        Text(folder.lastPathComponent)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(folder.path)
+                        Spacer()
+                        Button("Change…") { plugin.chooseFolder() }
+                        Button("Remove") { plugin.clearFolder() }
+                    }
+                } else {
+                    Button("Choose folder…") { plugin.chooseFolder() }
+                }
 
             case .photosLibrary:
                 switch plugin.photosAuthStatus {

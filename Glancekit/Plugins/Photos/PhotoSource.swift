@@ -58,6 +58,12 @@ enum FolderPhotoLoader {
         UserDefaults.standard.set(data, forKey: bookmarkKey)
     }
 
+    /// Forgets the persisted folder bookmark, dropping the app's security-scoped
+    /// access to it. The folder itself is untouched.
+    static func clearBookmark() {
+        UserDefaults.standard.removeObject(forKey: bookmarkKey)
+    }
+
     /// Enumerates image files in the bookmarked folder and decodes them.
     /// Never throws; returns an empty array on any failure (missing folder,
     /// denied access, no bookmark yet, etc.). Safe to call off the main thread.
