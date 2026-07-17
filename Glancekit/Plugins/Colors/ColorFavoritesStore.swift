@@ -1,12 +1,10 @@
 import SwiftUI
 import Observation
 
-/// Shared favorite-colors list backing both the Color Picker and Color Palette
-/// glances. A single, app-wide favorites list keeps a color you star in one
-/// tool visible in the other.
+/// The app-wide favorite-colors list, backing the Colors glance.
 ///
 /// Colors are stored as sRGB hex strings ("#RRGGBB", uppercase) in
-/// `UserDefaults`. The store is a singleton so every glance mutates the same
+/// `UserDefaults`. The store is a singleton so every surface mutates the same
 /// list and SwiftUI re-renders everywhere via `@Observable`.
 @MainActor
 @Observable

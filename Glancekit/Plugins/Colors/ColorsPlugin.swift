@@ -2,33 +2,62 @@ import SwiftUI
 import AppKit
 import Observation
 
-/// Color palette / favorites glance.
+/// Colors glance: eyedropper + palette in one tool.
 ///
-/// Presents a self-contained inline palette — a spectrum of preset swatches
-/// plus a saturation/brightness field with a hue slider — so the user can dial
-/// in any color without leaving the popover. (A menu-bar/accessory app can't
-/// reliably surface the system `NSColorPanel`, so the palette is drawn
-/// in-popover instead.) The current color's sRGB hex can be copied or starred
-/// into the app-wide favorites list shared with the Color Picker glance.
+/// Grabbing a color off screen and dialling one in by hand are the same job
+/// with two input methods, so they share one surface: whichever way a color
+/// arrives, it lands in the same live selection, which can be copied as an sRGB
+/// hex string or starred into favorites.
+///
+/// HSB is the source of truth for the selection — the 2D field (saturation ×
+/// brightness) and hue slider map onto it directly. Eyedropped colors are
+/// converted into HSB via `select(hex:)`; the round-trip back to sRGB hex is
+/// exact for 8-bit values, so a picked color reports the hex it was picked from.
+///
+/// A menu-bar/accessory app can't reliably surface the system `NSColorPanel`,
+/// so the palette is drawn in-popover rather than delegating to it.
 ///
 /// - Menu-bar: contributes nothing (`menuBarSummary` is nil) — popover-only.
-/// - Popover: an HSB saturation/brightness field + hue slider, a preset
-///   palette grid, the current color shown large with hex + copy + favorite
-///   controls, and a grid of favorite swatches.
+/// - Popover: a "Pick color" eyedropper button, the current color shown large
+///   with hex + RGB + copy/favorite controls, an HSB field + hue slider, recent
+///   picks, and favorites.
 @MainActor
 @Observable
-final class ColorPalettePlugin: GlancePlugin {
-    nonisolated var id: String { "colorpalette" }
-    nonisolated var title: String { "Color Palette" }
-    nonisolated var iconSystemName: String { "paintpalette" }
+final class ColorsPlugin: GlancePlugin {
+    // This glance supersedes the old "colorpicker" and "colorpalette" ones. The
+    // id is the persistence key for enabled/order state, so the retired ids are
+    // rewritten to this one by `PluginRegistry.migrateColorGlances()`.
+    nonisolated var id: String { "colors" }
+    nonisolated var title: String { "Colors" }
+    nonisolated var iconSystemName: String { "eyedropper" }
     var refreshInterval: TimeInterval { 0 }
     var menuBarSummary: String? { nil }
 
-    /// Current color in HSB, each component 0...1. HSB is the source of truth
-    /// so the 2D field (saturation × brightness) and hue slider map directly.
+    // Defaults keys keep their original "colorpicker" names so existing pick
+    // history and the uppercase preference survive the merge.
+    private let recentKey = "glancekit.colorpicker.recent"
+    private let uppercaseKey = "glancekit.colorpicker.uppercase"
+    private let maxRecents = 12
+
+    /// Current color in HSB, each component 0...1.
     var hue: Double = 0.58
     var saturation: Double = 1
     var brightness: Double = 1
+
+    /// Most-recent-first list of picked hex strings.
+    private(set) var recentHexes: [String]
+    private(set) var lastError: String?
+
+    var uppercase: Bool {
+        didSet { UserDefaults.standard.set(uppercase, forKey: uppercaseKey) }
+    }
+
+    init() {
+        recentHexes = UserDefaults.standard.stringArray(forKey: recentKey) ?? []
+        uppercase = UserDefaults.standard.object(forKey: uppercaseKey) as? Bool ?? true
+        // Reopen on the last color picked, so the tool resumes where it left off.
+        if let last = recentHexes.first { select(hex: last) }
+    }
 
     /// Current color components, 0...255 (derived from HSB).
     var red: Double { rgb.r }
@@ -47,16 +76,10 @@ final class ColorPalettePlugin: GlancePlugin {
                 Double(nsColor.blueComponent) * 255)
     }
 
-    /// Curated preset palette shown as tappable swatches.
-    let presets: [String] = [
-        "#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#00C7BE", "#30B0C7",
-        "#0091FF", "#5856D6", "#AF52DE", "#FF2D55", "#A2845E", "#8E8E93",
-        "#000000", "#3A3A3C", "#636366", "#8E8E93", "#C7C7CC", "#FFFFFF",
-    ]
-
-    /// sRGB hex ("#RRGGBB", uppercase) for the current components.
+    /// sRGB hex ("#RRGGBB") for the current selection, cased per `uppercase`.
     var selectedHex: String {
-        String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+        let format = uppercase ? "#%02X%02X%02X" : "#%02x%02x%02x"
+        return String(format: format, byte(red), byte(green), byte(blue))
     }
 
     var selectedColor: Color {
@@ -66,18 +89,41 @@ final class ColorPalettePlugin: GlancePlugin {
     // MARK: GlancePlugin
 
     func refresh() async {
-        // Nothing to auto-refresh; the palette is user-driven.
+        // Nothing to auto-refresh; the tool is entirely user-driven.
     }
 
     func popoverSection() -> AnyView {
-        AnyView(ColorPalettePopover(plugin: self))
+        AnyView(ColorsPopover(plugin: self))
     }
 
     func settingsSection() -> AnyView {
-        AnyView(ColorPaletteSettings(plugin: self))
+        AnyView(ColorsSettings(plugin: self))
     }
 
     // MARK: Actions
+
+    /// Opens the system eyedropper. On pick, loads the color into the live
+    /// selection, copies its hex to the pasteboard, and records it in history.
+    ///
+    /// Sampling means clicking somewhere else on screen, which would read as a
+    /// click outside the tool window and dismiss it mid-pick — so auto-close is
+    /// suspended for the duration. The resume must run on every path, including
+    /// cancellation, or the window could never be dismissed again.
+    func pickColor() {
+        lastError = nil
+        ToolWindowManager.shared.suspendAutoClose()
+        NSColorSampler().show { [weak self] color in
+            MainActor.assumeIsolated {
+                ToolWindowManager.shared.resumeAutoClose()
+                guard let self, let color else { return } // nil = user cancelled
+                guard let hex = ColorHex.hexString(from: color, uppercase: self.uppercase) else {
+                    self.lastError = "Couldn't read that color"
+                    return
+                }
+                self.recordPick(hex)
+            }
+        }
+    }
 
     /// Loads a hex string into the live HSB selection.
     func select(hex: String) {
@@ -90,11 +136,15 @@ final class ColorPalettePlugin: GlancePlugin {
         brightness = Double(b)
     }
 
-    /// Copies the current hex to the general pasteboard.
+    /// Selects a swatch and copies it, without adding a duplicate history entry
+    /// (a recent one just moves back to the front).
+    func selectSwatch(_ hex: String) {
+        recordPick(hex)
+    }
+
+    /// Copies the current selection's hex to the general pasteboard.
     func copySelected() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(selectedHex, forType: .string)
+        copyToPasteboard(selectedHex)
     }
 
     /// Adds or removes the current color from the shared favorites list.
@@ -102,7 +152,32 @@ final class ColorPalettePlugin: GlancePlugin {
         ColorFavoritesStore.shared.toggle(selectedHex)
     }
 
+    func clearHistory() {
+        recentHexes = []
+        persistRecents()
+    }
+
     // MARK: Helpers
+
+    private func recordPick(_ hex: String) {
+        select(hex: hex)
+        copyToPasteboard(hex)
+        var updated = recentHexes.filter { $0.caseInsensitiveCompare(hex) != .orderedSame }
+        updated.insert(hex, at: 0)
+        if updated.count > maxRecents { updated = Array(updated.prefix(maxRecents)) }
+        recentHexes = updated
+        persistRecents()
+    }
+
+    private func persistRecents() {
+        UserDefaults.standard.set(recentHexes, forKey: recentKey)
+    }
+
+    private func copyToPasteboard(_ hex: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(hex, forType: .string)
+    }
 
     private func byte(_ component: Double) -> Int {
         Int((min(max(component, 0), 255)).rounded())
@@ -111,14 +186,27 @@ final class ColorPalettePlugin: GlancePlugin {
 
 // MARK: - Popover UI
 
-private struct ColorPalettePopover: View {
-    @Bindable var plugin: ColorPalettePlugin
+private struct ColorsPopover: View {
+    @Bindable var plugin: ColorsPlugin
     private let store = ColorFavoritesStore.shared
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 6)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Button {
+                plugin.pickColor()
+            } label: {
+                Label("Pick color", systemImage: "eyedropper")
+                    .frame(maxWidth: .infinity)
+            }
+
+            if let err = plugin.lastError {
+                Label(err, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             // Current color + hex + actions.
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 8)
@@ -126,16 +214,22 @@ private struct ColorPalettePopover: View {
                     .frame(width: 44, height: 44)
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
 
+                // The hex code is the whole point of the tool — never let it
+                // truncate, even in the narrow popover. Everything else gives
+                // way to it first.
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plugin.selectedHex)
                         .font(.body.monospaced().weight(.semibold))
+                        .textSelection(.enabled)
+                        .fixedSize()
                     Text("R \(Int(plugin.red))  G \(Int(plugin.green))  B \(Int(plugin.blue))")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize()
                 }
+                .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 Button {
                     plugin.toggleFavorite()
@@ -147,6 +241,7 @@ private struct ColorPalettePopover: View {
                 .help(store.isFavorite(plugin.selectedHex) ? "Remove from favorites" : "Add to favorites")
 
                 Button("Copy") { plugin.copySelected() }
+                    .fixedSize()
             }
 
             // Saturation × brightness field + hue slider.
@@ -162,13 +257,15 @@ private struct ColorPalettePopover: View {
                     .frame(height: 18)
             }
 
-            Divider()
-            Text("Palette")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(plugin.presets, id: \.self) { hex in
-                    PaletteSwatch(hex: hex) { plugin.select(hex: hex) }
+            if !plugin.recentHexes.isEmpty {
+                Divider()
+                Text("Recent")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(plugin.recentHexes, id: \.self) { hex in
+                        ColorSwatch(hex: hex) { plugin.selectSwatch(hex) }
+                    }
                 }
             }
 
@@ -184,7 +281,7 @@ private struct ColorPalettePopover: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 6) {
                     ForEach(store.favorites, id: \.self) { hex in
-                        PaletteSwatch(hex: hex) { plugin.select(hex: hex) }
+                        ColorSwatch(hex: hex) { plugin.select(hex: hex) }
                             .contextMenu {
                                 Button("Remove", role: .destructive) { store.remove(hex) }
                             }
@@ -280,7 +377,7 @@ private struct HueSlider: View {
     }
 }
 
-private struct PaletteSwatch: View {
+private struct ColorSwatch: View {
     let hex: String
     let action: () -> Void
 
@@ -303,19 +400,34 @@ private struct PaletteSwatch: View {
 
 // MARK: - Settings UI
 
-private struct ColorPaletteSettings: View {
-    @Bindable var plugin: ColorPalettePlugin
+private struct ColorsSettings: View {
+    @Bindable var plugin: ColorsPlugin
     private let store = ColorFavoritesStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Color Palette")
+            Text("Colors")
                 .font(.headline)
 
-            Text("Favorites are shared with the Color Picker glance.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Toggle("Uppercase hex codes", isOn: $plugin.uppercase)
 
+            Divider()
+
+            Text("History")
+                .font(.headline)
+            Text("Keeps the last 12 picked colors.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Clear history", role: .destructive) {
+                plugin.clearHistory()
+            }
+            .disabled(plugin.recentHexes.isEmpty)
+
+            Divider()
+
+            Text("Favorites")
+                .font(.headline)
+            Text("Star a color to keep it here.")
+                .font(.caption).foregroundStyle(.secondary)
             Button("Clear favorites", role: .destructive) {
                 store.clear()
             }
