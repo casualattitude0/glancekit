@@ -20,7 +20,9 @@ final class RefreshCoordinator {
         self.registry = registry
     }
 
-    /// Start (or restart) refresh loops for all currently-enabled plugins.
+    /// Start refresh loops for all currently-enabled plugins. Called at launch
+    /// from the menu-bar label. Safe to call repeatedly: it reconciles, so a
+    /// plugin that already has a loop keeps the one it has.
     func start() {
         reconcile()
     }
@@ -70,10 +72,5 @@ final class RefreshCoordinator {
                 self?.lastRefresh = Date()
             }
         }
-    }
-
-    func stop() {
-        for (_, task) in tasks { task.cancel() }
-        tasks.removeAll()
     }
 }

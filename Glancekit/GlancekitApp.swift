@@ -64,7 +64,6 @@ struct GlancekitApp: App {
                 .environment(registry)
                 .environment(coordinator)
                 .frame(width: 340)
-                .onAppear { coordinator.start() }
         } label: {
             MenuBarLabelView()
                 .environment(registry)
