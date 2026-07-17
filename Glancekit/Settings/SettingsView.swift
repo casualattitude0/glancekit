@@ -40,6 +40,11 @@ struct SettingsView: View {
             detail
         }
         .frame(width: 620, height: 460)
+        // Settings has no Cancel button to bind ⎋ to, so nothing else claims it.
+        // The shortcut recorder swallows ⎋ while recording via a local event
+        // monitor, which runs before the responder chain — so cancelling a
+        // recording never falls through to closing the window.
+        .onExitCommand { SettingsWindowPresenter.close() }
     }
 
     // MARK: - Sidebar

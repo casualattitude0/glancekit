@@ -35,8 +35,9 @@ struct GlancekitApp: App {
 
         // ── Global shortcuts ──────────────────────────────────────────────
         // A glance action toggles its tool window open at the mouse (⌥1 by
-        // default); Quick Switch steps through the ring (⌥⇥). Both are
-        // rebindable on the Shortcuts settings page.
+        // default); Quick Switch steps through the ring (⌥⇥); Open Settings
+        // fronts the Settings window (⌥`). All are rebindable on the Shortcuts
+        // settings page.
         let hotkeys = HotkeyCenter()
         for action in ShortcutAction.allCases {
             hotkeys.setHandler(for: action) {
@@ -46,6 +47,8 @@ struct GlancekitApp: App {
                 case .colors:
                     guard let plugin = action.pluginID.flatMap(registry.plugin(id:)) else { return }
                     ToolWindowManager.shared.toggle(plugin: plugin)
+                case .settings:
+                    SettingsWindowPresenter.toggle()
                 }
             }
         }
