@@ -16,38 +16,28 @@ struct QuickSwitchSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            // Split the same way the Glances page is, so the rows the shortcut
+            // actually steps through read as a ring on their own rather than
+            // having to be picked out of a mixed list. A grayed-out row sorts
+            // below with the excluded ones — its switch reads off, so grouping
+            // it as included would contradict the switch beside it.
             List {
-                ForEach(rows, id: \.id) { row in
-                    HStack {
-                        Image(systemName: "line.3.horizontal")
-                            .foregroundStyle(.tertiary)
-                        Label(row.title, systemImage: row.icon)
-                        if !row.isEnabled {
-                            Text("Off in Glances")
-                                .font(.caption)
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            // A glance that's off can't be in the ring, so the
-                            // switch reads off however the row is stored. The
-                            // stored value is left alone rather than cleared:
-                            // re-enable the glance on the Glances page and the
-                            // ring it was part of comes back intact.
-                            get: { row.isEnabled && quickSwitch.isIncluded(row.id) },
-                            set: { quickSwitch.setIncluded(row.id, $0) }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
+                if !includedRows.isEmpty {
+                    Section("Included") {
+                        ForEach(includedRows, id: \.id, content: rowBody)
+                            .onMove { offsets, destination in
+                                move(includedRows, offsets, destination)
+                            }
                     }
-                    // Grays the whole row and blocks the switch; `moveDisabled`
-                    // covers what `disabled` doesn't reach — a List row stays
-                    // draggable otherwise, and a row you can't switch but can
-                    // drag is a strange half-inert thing.
-                    .disabled(!row.isEnabled)
-                    .moveDisabled(!row.isEnabled)
                 }
-                .onMove { offsets, destination in
-                    quickSwitch.move(rows.map(\.id), fromOffsets: offsets, toOffset: destination)
+
+                if !excludedRows.isEmpty {
+                    Section("Not included") {
+                        ForEach(excludedRows, id: \.id, content: rowBody)
+                            .onMove { offsets, destination in
+                                move(excludedRows, offsets, destination)
+                            }
+                    }
                 }
             }
             .frame(minHeight: 260)
@@ -65,6 +55,43 @@ struct QuickSwitchSettingsView: View {
         }
     }
 
+    private func rowBody(_ row: Row) -> some View {
+        HStack {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+            Label(row.title, systemImage: row.icon)
+            if !row.isEnabled {
+                Text("Off in Glances")
+                    .font(.caption)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                // A glance that's off can't be in the ring, so the switch reads
+                // off however the row is stored. The stored value is left alone
+                // rather than cleared: re-enable the glance on the Glances page
+                // and the ring it was part of comes back intact.
+                get: { row.isIncluded },
+                set: { quickSwitch.setIncluded(row.id, $0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+        }
+        // Grays the whole row and blocks the switch; `moveDisabled` covers what
+        // `disabled` doesn't reach — a List row stays draggable otherwise, and a
+        // row you can't switch but can drag is a strange half-inert thing.
+        .disabled(!row.isEnabled)
+        .moveDisabled(!row.isEnabled)
+    }
+
+    private func move(_ group: [Row], _ offsets: IndexSet, _ destination: Int) {
+        quickSwitch.move(
+            group.map(\.id),
+            within: rows.map(\.id),
+            fromOffsets: offsets,
+            toOffset: destination
+        )
+    }
+
     private var intro: String {
         let key = hotkeys.shortcut(for: .quickSwitch)?.displayString
         let press = key.map { "Press \($0)" } ?? "The Quick Switch shortcut"
@@ -73,17 +100,24 @@ struct QuickSwitchSettingsView: View {
 
     /// Every glance in ring order, whether it's in the ring or not — the page
     /// has to show the excluded ones for there to be anything to switch on.
+    /// This stays the full stored order: the two groups below are how it's
+    /// displayed, not a second order to keep in step.
     private var rows: [Row] {
         quickSwitch.orderedIDs.compactMap { id in
             guard let plugin = registry.plugin(id: id) else { return nil }
+            let isEnabled = registry.isEnabled(id)
             return Row(
                 id: id,
                 title: plugin.title,
                 icon: plugin.iconSystemName,
-                isEnabled: registry.isEnabled(id)
+                isEnabled: isEnabled,
+                isIncluded: isEnabled && quickSwitch.isIncluded(id)
             )
         }
     }
+
+    private var includedRows: [Row] { rows.filter(\.isIncluded) }
+    private var excludedRows: [Row] { rows.filter { !$0.isIncluded } }
 
     private var ringCount: Int { quickSwitch.ring(in: registry).count }
 
@@ -91,6 +125,10 @@ struct QuickSwitchSettingsView: View {
         let id: String
         let title: String
         let icon: String
+        /// Whether the glance is on at all, over on the Glances page.
         let isEnabled: Bool
+        /// Whether it takes part in the ring right now — which a glance that's
+        /// off never does, however it's stored.
+        let isIncluded: Bool
     }
 }

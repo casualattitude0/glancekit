@@ -52,16 +52,30 @@ final class QuickSwitchStore {
         persist()
     }
 
-    /// Move a glance within the ring order (for drag-to-reorder in Settings).
+    /// Move a glance within one group of the ring order (for drag-to-reorder in
+    /// Settings, which lists the included and excluded glances separately).
     ///
-    /// `ids` is the list the offsets came from — the rows as displayed, which
-    /// resolve against registered plugins. Taking it rather than reordering
-    /// `orderedIDs` directly keeps the offsets meaningful when the stored order
-    /// still holds a retired id, and prunes that id on the way through.
-    func move(_ ids: [String], fromOffsets offsets: IndexSet, toOffset destination: Int) {
-        var ids = ids
-        ids.move(fromOffsets: offsets, toOffset: destination)
-        orderedIDs = ids
+    /// `displayed` is every row on the page in display order, and `group` the
+    /// rows of the dragged group alone — the offsets are relative to that group.
+    /// Rebuilding from `displayed` rather than reordering `orderedIDs` directly
+    /// keeps the offsets meaningful when the stored order still holds a retired
+    /// id, and prunes that id on the way through.
+    ///
+    /// The moved ids go back into the slots the group already held, so putting
+    /// the ring in the order you want to tab through never shifts an excluded
+    /// glance away from the neighbors it will rejoin when switched on.
+    func move(
+        _ group: [String],
+        within displayed: [String],
+        fromOffsets offsets: IndexSet,
+        toOffset destination: Int
+    ) {
+        var group = group
+        group.move(fromOffsets: offsets, toOffset: destination)
+
+        let slots = Set(group)
+        var next = group.makeIterator()
+        orderedIDs = displayed.map { slots.contains($0) ? (next.next() ?? $0) : $0 }
         persist()
     }
 
