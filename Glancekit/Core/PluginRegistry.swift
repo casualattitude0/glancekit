@@ -38,6 +38,7 @@ final class PluginRegistry {
             enabledIDs = [] // seeded on first register() call below
         }
         migrateColorGlances()
+        migratePomodoroSplit()
     }
 
     // MARK: - Migrations
@@ -76,6 +77,40 @@ final class PluginRegistry {
 
         orderedIDs.removeAll { retired.contains($0) }
         enabledIDs.subtract(retired)
+
+        persist()
+    }
+
+    /// One-shot: the Pomodoro timer left the "timeprod" glance and became the
+    /// standalone "pomodoro" glance. Lands it next to the glance it came out of
+    /// and carries over whether the user had the sub-feature switched on.
+    ///
+    /// Without this the new glance would be missing from `enabledIDs` — and
+    /// `register()` only seeds enabled state on a first-ever launch — so anyone
+    /// already using the Pomodoro timer would find it silently gone.
+    private func migratePomodoroSplit() {
+        let migrationKey = "glancekit.migration.pomodoroSplit"
+        guard !defaults.bool(forKey: migrationKey) else { return }
+        defaults.set(true, forKey: migrationKey)
+
+        let source = "timeprod"
+        let split = "pomodoro"
+        let featureKey = "glancekit.timeprod.pomodoro"
+
+        // Fresh install: nothing to carry over. Returning before `persist()`
+        // matters — writing the (empty) keys here would make `register()` think
+        // this isn't a first launch and skip seeding every glance on.
+        guard orderedIDs.contains(source) else { return }
+
+        if !orderedIDs.contains(split), let slot = orderedIDs.firstIndex(of: source) {
+            orderedIDs.insert(split, at: slot + 1)
+        }
+        // The sub-feature defaulted on, so a missing key means it was on.
+        let wasShowingPomodoro = defaults.object(forKey: featureKey) as? Bool ?? true
+        if enabledIDs.contains(source), wasShowingPomodoro {
+            enabledIDs.insert(split)
+        }
+        defaults.removeObject(forKey: featureKey)
 
         persist()
     }
