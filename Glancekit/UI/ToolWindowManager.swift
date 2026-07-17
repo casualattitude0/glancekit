@@ -61,6 +61,37 @@ final class ToolWindowManager {
         show(plugin: plugin)
     }
 
+    /// Shows the glance after the visible one in `plugins`, wrapping at the end.
+    /// With no tool window up, opens the first. This is what the Quick Switch
+    /// shortcut calls: each press advances one step around the ring.
+    ///
+    /// The window being stepped away from is closed rather than left behind, so
+    /// a lap around the ring doesn't litter the screen with every glance in it.
+    func quickSwitch(among plugins: [any GlancePlugin]) {
+        guard !plugins.isEmpty else { return }
+        // Same reasoning as `toggle`: an eyedrop in progress owns the screen,
+        // and swapping windows underneath it would discard the pick.
+        guard !isAutoCloseSuspended else { return }
+
+        guard let current = visiblePluginID,
+              let index = plugins.firstIndex(where: { $0.id == current })
+        else {
+            // Nothing up, or what's up isn't in the ring: start at the top.
+            show(plugin: plugins[0])
+            return
+        }
+
+        close(pluginID: current)
+        show(plugin: plugins[(index + 1) % plugins.count])
+    }
+
+    /// The glance whose tool window is currently on screen, if any. Only the
+    /// most recently shown one counts — the others were closed on the way here.
+    private var visiblePluginID: String? {
+        guard let id = lastShownPluginID, windows[id]?.isVisible == true else { return nil }
+        return id
+    }
+
     /// Brings the given glance's tool window to front at the current mouse
     /// position, creating it on first use.
     func show(plugin: any GlancePlugin) {

@@ -2,40 +2,56 @@ import AppKit
 import Carbon.HIToolbox
 import Observation
 
-/// The things a global shortcut can trigger. Each action opens its glance's
-/// tool window (see `ToolWindowManager`).
+/// The things a global shortcut can trigger. Most actions open one glance's
+/// tool window (see `ToolWindowManager`); `quickSwitch` steps through the ring
+/// of glances the user picked on the Quick Switch settings page.
 ///
-/// The raw value is both the persistence key and the id of the plugin the
-/// action opens — never change it once shipped.
+/// Declaration order is the order the Shortcuts settings page lists them in.
+///
+/// The raw value is the persistence key — never change it once shipped.
 enum ShortcutAction: String, CaseIterable, Identifiable {
+    case quickSwitch = "quickswitch"
     case colors = "colors"
 
     var id: String { rawValue }
 
-    /// The `GlancePlugin.id` this action opens. Distinct from `rawValue` (the
-    /// persistence key) so the two can be renamed independently.
-    var pluginID: String {
+    /// The `GlancePlugin.id` this action opens, or `nil` if it isn't tied to a
+    /// single glance. Distinct from `rawValue` (the persistence key) so the two
+    /// can be renamed independently.
+    var pluginID: String? {
         switch self {
+        case .quickSwitch: nil
         case .colors: "colors"
         }
     }
 
     var title: String {
         switch self {
+        case .quickSwitch: "Quick Switch"
         case .colors: "Open Colors"
+        }
+    }
+
+    var subtitle: String? {
+        switch self {
+        case .quickSwitch: "Steps through the glances chosen on the Quick Switch page."
+        case .colors: nil
         }
     }
 
     var iconSystemName: String {
         switch self {
+        case .quickSwitch: "rectangle.stack"
         case .colors: "eyedropper"
         }
     }
 
     var defaultShortcut: GlobalShortcut {
         switch self {
+        case .quickSwitch:
+            GlobalShortcut(keyCode: UInt16(kVK_Tab), modifiers: [.option])
         case .colors:
-            GlobalShortcut(keyCode: UInt16(kVK_ANSI_1), modifiers: [.command, .shift])
+            GlobalShortcut(keyCode: UInt16(kVK_ANSI_1), modifiers: [.option])
         }
     }
 
@@ -45,6 +61,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     /// Color Palette binding (⇧⌘2) is dropped.
     var legacyStorageKey: String? {
         switch self {
+        case .quickSwitch: nil
         case .colors: "colorpicker"
         }
     }

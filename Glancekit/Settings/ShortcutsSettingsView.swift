@@ -11,7 +11,7 @@ struct ShortcutsSettingsView: View {
             Text("Global Shortcuts")
                 .font(.headline)
 
-            Text("These work anywhere in macOS, even when Glancekit isn't frontmost. Each opens the tool in its own window at the mouse. Press the shortcut again — or click outside the window, or press Close — to dismiss it.")
+            Text("These work anywhere in macOS, even when Glancekit isn't frontmost. They open a glance in its own window at the mouse. Press the shortcut again — or click outside the window, or press Close — to dismiss it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -65,6 +65,12 @@ private struct ShortcutRow: View {
                 .buttonStyle(.borderless)
                 .help("Reset to \(action.defaultShortcut.displayString)")
                 .disabled(shortcut == action.defaultShortcut)
+            }
+
+            if let subtitle = action.subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if hotkeys.failedActions.contains(action) {
