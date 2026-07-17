@@ -21,12 +21,6 @@ final class PluginRegistry {
     /// Set of enabled plugin IDs.
     private(set) var enabledIDs: Set<String> = []
 
-    /// Set of plugin IDs the user has opted into the rotating menu-bar readout.
-    /// Independent of `enabledIDs`: a glance can be enabled (visible in the
-    /// popover) yet excluded from the compact status-bar rotation, and vice
-    /// versa. Seeded to all plugins on first launch.
-    private(set) var menuBarIDs: Set<String> = []
-
     /// The section the Settings window should show. `nil` = the Glances tab.
     /// Set from the popover (clicking a glance) to deep-link into that plugin's
     /// settings; the Settings view observes and follows it.
@@ -35,7 +29,6 @@ final class PluginRegistry {
     private let defaults = UserDefaults.standard
     private let orderKey = "glancekit.plugin.order"
     private let enabledKey = "glancekit.plugin.enabled"
-    private let menuBarKey = "glancekit.plugin.menubar"
 
     init() {
         orderedIDs = defaults.stringArray(forKey: orderKey) ?? []
@@ -43,11 +36,6 @@ final class PluginRegistry {
             enabledIDs = Set(saved)
         } else {
             enabledIDs = [] // seeded on first register() call below
-        }
-        if let saved = defaults.stringArray(forKey: menuBarKey) {
-            menuBarIDs = Set(saved)
-        } else {
-            menuBarIDs = [] // seeded on first register() call below
         }
         migrateColorGlances()
     }
@@ -77,7 +65,6 @@ final class PluginRegistry {
         // this isn't a first launch and skip seeding every glance on.
         guard orderedIDs.contains(where: retired.contains)
                 || enabledIDs.contains(where: retired.contains)
-                || menuBarIDs.contains(where: retired.contains)
         else { return }
 
         if !orderedIDs.contains(merged),
@@ -86,11 +73,9 @@ final class PluginRegistry {
         }
         // Either half being on is enough: the merged tool does both jobs.
         if enabledIDs.contains(where: retired.contains) { enabledIDs.insert(merged) }
-        if menuBarIDs.contains(where: retired.contains) { menuBarIDs.insert(merged) }
 
         orderedIDs.removeAll { retired.contains($0) }
         enabledIDs.subtract(retired)
-        menuBarIDs.subtract(retired)
 
         persist()
     }
@@ -104,10 +89,6 @@ final class PluginRegistry {
         if defaults.stringArray(forKey: enabledKey) == nil {
             enabledIDs.insert(plugin.id)
         }
-        // First-ever launch: include every glance in the menu-bar rotation.
-        if defaults.stringArray(forKey: menuBarKey) == nil {
-            menuBarIDs.insert(plugin.id)
-        }
         if !orderedIDs.contains(plugin.id) {
             orderedIDs.append(plugin.id)
         }
@@ -119,12 +100,6 @@ final class PluginRegistry {
         orderedPlugins.filter { enabledIDs.contains($0.id) }
     }
 
-    /// Plugins that should feed the rotating menu-bar readout: enabled AND
-    /// opted into the menu bar, in the user's chosen order.
-    var menuBarPluginsInOrder: [any GlancePlugin] {
-        orderedPlugins.filter { enabledIDs.contains($0.id) && menuBarIDs.contains($0.id) }
-    }
-
     /// All plugins in user order (regardless of enabled state) — for Settings.
     var orderedPlugins: [any GlancePlugin] {
         orderedIDs.compactMap { id in plugins.first { $0.id == id } }
@@ -134,13 +109,6 @@ final class PluginRegistry {
 
     func setEnabled(_ id: String, _ enabled: Bool) {
         if enabled { enabledIDs.insert(id) } else { enabledIDs.remove(id) }
-        persist()
-    }
-
-    func isInMenuBar(_ id: String) -> Bool { menuBarIDs.contains(id) }
-
-    func setInMenuBar(_ id: String, _ inMenuBar: Bool) {
-        if inMenuBar { menuBarIDs.insert(id) } else { menuBarIDs.remove(id) }
         persist()
     }
 
@@ -159,6 +127,5 @@ final class PluginRegistry {
     private func persist() {
         defaults.set(orderedIDs, forKey: orderKey)
         defaults.set(Array(enabledIDs), forKey: enabledKey)
-        defaults.set(Array(menuBarIDs), forKey: menuBarKey)
     }
 }

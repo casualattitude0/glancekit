@@ -50,15 +50,6 @@ final class CustomAPIPlugin: GlancePlugin {
 
     // MARK: GlancePlugin
 
-    var menuBarSummary: String? {
-        for tracker in trackers {
-            if let value = results[tracker.id]?.value, !value.isEmpty {
-                return "\(tracker.label) \(value)"
-            }
-        }
-        return nil
-    }
-
     func refresh() async {
         guard !trackers.isEmpty else { return }
         for tracker in trackers {

@@ -35,17 +35,6 @@ final class StocksPlugin: GlancePlugin {
 
     // MARK: GlancePlugin
 
-    var menuBarSummary: String? { quotes.first.map(Self.summary) }
-
-    /// One rotating entry per watchlist symbol, in watchlist order, so the bar
-    /// cycles through the whole list rather than pinning the first quote.
-    var menuBarSummaries: [String] { quotes.map(Self.summary) }
-
-    private static func summary(_ q: StockQuote) -> String {
-        let arrow = q.isUp ? "▲" : "▼"
-        return String(format: "%@ %.2f %@%.2f%%", q.symbol, q.price, arrow, abs(q.changePercent))
-    }
-
     func refresh() async {
         let provider: QuoteProvider
         if let key = CredentialStore.get("finnhub.apiKey"), !key.isEmpty {

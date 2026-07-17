@@ -92,16 +92,6 @@ final class TimeProductivityPlugin: GlancePlugin {
 
     // MARK: GlancePlugin
 
-    var menuBarSummary: String? {
-        if calendarEnabled, feed.calendarAuthState == .authorized, let event = nextEvent {
-            return "\(event.title) \(Self.relativeShort(event.startDate))"
-        }
-        if pomodoroEnabled, pomodoro.isRunning {
-            return "\(pomodoro.phase.rawValue) \(pomodoro.remainingText)"
-        }
-        return nil
-    }
-
     func refresh() async {
         lastError = nil
 

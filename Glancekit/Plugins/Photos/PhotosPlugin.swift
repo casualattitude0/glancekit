@@ -17,7 +17,6 @@ final class PhotosPlugin: GlancePlugin {
     /// Reload the slide list every ~10 minutes; slide-to-slide advance is
     /// handled locally by a timer in the popover view.
     var refreshInterval: TimeInterval { 600 }
-    var menuBarSummary: String? { nil }
 
     private static let sourceKey = "glancekit.photos.source"
     private static let intervalKey = "glancekit.photos.interval"

@@ -2,13 +2,13 @@
 
 A modular macOS menu bar suite for glancing at everything that matters — all in one place. Fully extensible, with no limit on what gets added next.
 
-Glancekit lives in your menu bar and surfaces compact, at-a-glance information from a growing set of independent **glances** (plugins) — weather, stocks, GitHub activity, system stats, photos, and more. Click the menu bar item for a rich popover; each glance renders its own section and refreshes on its own schedule.
+Glancekit lives in your menu bar and surfaces at-a-glance information from a growing set of independent **glances** (plugins) — weather, stocks, GitHub activity, system stats, photos, and more. Click the menu bar item for a rich popover; each glance renders its own section and refreshes on its own schedule.
 
 > **Requirements:** macOS 14.0+ and Xcode 15+ (Swift, SwiftUI, WidgetKit).
 
 ## Features
 
-- **Menu bar first** — a compact summary in the status bar, a detailed popover on click.
+- **Menu bar first** — an unobtrusive status-bar icon, a detailed popover on click.
 - **Modular glances** — each glance is a self-contained plugin that touches only its own folder.
 - **Home Screen / Notification Center widgets** — via the bundled WidgetKit extension.
 - **Secure by default** — secrets go through a dedicated `CredentialStore` (Keychain), never `UserDefaults`.
@@ -66,7 +66,6 @@ protocol GlancePlugin: AnyObject {
     var title: String { get }                  // shown in Settings + popover
     var iconSystemName: String { get }         // SF Symbol
     var refreshInterval: TimeInterval { get }  // seconds; 0 = refresh once on start
-    var menuBarSummary: String? { get }        // compact status-bar text; nil = popover-only
     func refresh() async                       // fetch/recompute; never throws
     func popoverSection() -> AnyView           // rich popover content
     func settingsSection() -> AnyView          // per-glance settings (optional)

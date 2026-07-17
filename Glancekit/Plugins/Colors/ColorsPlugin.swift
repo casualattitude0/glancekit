@@ -17,7 +17,6 @@ import Observation
 /// A menu-bar/accessory app can't reliably surface the system `NSColorPanel`,
 /// so the palette is drawn in-popover rather than delegating to it.
 ///
-/// - Menu-bar: contributes nothing (`menuBarSummary` is nil) — popover-only.
 /// - Popover: a "Pick color" eyedropper button, the current color shown large
 ///   with hex + RGB + copy/favorite controls, an HSB field + hue slider, recent
 ///   picks, and favorites.
@@ -31,7 +30,6 @@ final class ColorsPlugin: GlancePlugin {
     nonisolated var title: String { "Colors" }
     nonisolated var iconSystemName: String { "eyedropper" }
     var refreshInterval: TimeInterval { 0 }
-    var menuBarSummary: String? { nil }
 
     // Defaults keys keep their original "colorpicker" names so existing pick
     // history and the uppercase preference survive the merge.

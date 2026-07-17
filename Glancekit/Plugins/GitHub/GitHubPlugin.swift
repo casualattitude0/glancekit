@@ -48,13 +48,6 @@ final class GitHubPlugin: GlancePlugin {
 
     // MARK: GlancePlugin
 
-    var menuBarSummary: String? {
-        guard !accountData.isEmpty else { return nil }
-        let count = accountData.reduce(0) { $0 + $1.unreadCount }
-        guard count > 0 else { return nil }
-        return "GH \(count)●"
-    }
-
     func refresh() async {
         reloadAccounts()
         guard !accountData.isEmpty else { return }
