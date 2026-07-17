@@ -4,6 +4,7 @@ import SwiftUI
 struct GlancekitApp: App {
     @State private var registry: PluginRegistry
     @State private var coordinator: RefreshCoordinator
+    @State private var updater = UpdateChecker()
 
     init() {
         let registry = PluginRegistry()
@@ -36,6 +37,7 @@ struct GlancekitApp: App {
             PopoverRootView()
                 .environment(registry)
                 .environment(coordinator)
+                .environment(updater)
                 .frame(width: 340)
                 .onAppear { coordinator.start() }
         } label: {

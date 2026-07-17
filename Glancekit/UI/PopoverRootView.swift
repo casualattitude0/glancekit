@@ -6,6 +6,7 @@ import SwiftUI
 struct PopoverRootView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
+    @Environment(UpdateChecker.self) private var updater
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
@@ -80,6 +81,8 @@ struct PopoverRootView: View {
             Text("Glancekit")
                 .font(.headline)
             Spacer()
+            updateButton
+
             Button {
                 coordinator.refreshAllNow()
             } label: {
@@ -107,5 +110,52 @@ struct PopoverRootView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    /// Checks GitHub Releases and downloads a newer build. The glyph reflects the
+    /// updater's phase so the single button doubles as its own status indicator.
+    @ViewBuilder
+    private var updateButton: some View {
+        Button {
+            Task { await updater.checkAndDownload() }
+        } label: {
+            switch updater.phase {
+            case .checking, .downloading:
+                ProgressView()
+                    .controlSize(.small)
+            case .upToDate:
+                Image(systemName: "checkmark.circle")
+            case .downloaded:
+                Image(systemName: "checkmark.circle.fill")
+            case .updateAvailable:
+                Image(systemName: "arrow.down.circle.fill")
+            case .failed:
+                Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+            case .idle:
+                Image(systemName: "arrow.down.circle")
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(isUpdateBusy)
+        .help(updateHelp)
+    }
+
+    private var isUpdateBusy: Bool {
+        switch updater.phase {
+        case .checking, .downloading: return true
+        default: return false
+        }
+    }
+
+    private var updateHelp: String {
+        switch updater.phase {
+        case .idle: return "Download latest version"
+        case .checking: return "Checking for updates…"
+        case .downloading: return "Downloading update…"
+        case .upToDate: return "You're on the latest version (\(updater.currentVersion))"
+        case .downloaded(let url): return "Downloaded to \(url.lastPathComponent) — click to check again"
+        case .updateAvailable(let r): return "Version \(r.version) available — opened the release page"
+        case .failed(let msg): return "Update check failed: \(msg)"
+        }
     }
 }
