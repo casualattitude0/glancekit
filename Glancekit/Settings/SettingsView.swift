@@ -1,98 +1,104 @@
 import SwiftUI
 
-/// The Settings window. A horizontally-scrolling row of section chips replaces
-/// the native `TabView` tab bar (which overflowed extra plugins into a `>>`
-/// dropdown drawer). The first chip is a uniform "Glances" list (toggle +
-/// drag-to-reorder); the rest are each plugin's own `settingsSection()`.
+/// The Settings window: a sidebar of sections beside a detail pane, matching the
+/// standard macOS settings layout (System Settings, Xcode, Mail).
+///
+/// The sidebar replaces an earlier custom chip bar — and, before that, a native
+/// `TabView`, whose tab bar overflowed extra plugins into a `>>` dropdown. A
+/// sidebar list scrolls vertically and stays legible however many plugins are
+/// registered. The first group holds the app-wide pages ("Glances" — toggle +
+/// drag-to-reorder — and "Shortcuts"); the second lists each plugin's own
+/// `settingsSection()`.
 struct SettingsView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
 
     /// Sentinel `settingsSelection` values for the pages that aren't a plugin's
-    /// own section (nil = Glances, a plugin id = that plugin's section).
-    private static let menuBarSelection = "__menubar__"
+    /// own section. `registry.settingsSelection` uses `nil` for the Glances page
+    /// (that's the deep-link contract the popover writes to), but a `List`
+    /// selection reads `nil` as "nothing selected" — so the sidebar swaps in
+    /// this sentinel and `sidebarSelection` maps it back at the boundary.
+    private static let glancesSelection = "__glances__"
     private static let shortcutsSelection = "__shortcuts__"
 
+    /// Bridges the registry's `nil`-means-Glances contract to a `List` selection
+    /// where `nil` means nothing is selected.
+    private var sidebarSelection: Binding<String?> {
+        Binding(
+            get: { registry.settingsSelection ?? Self.glancesSelection },
+            set: { registry.settingsSelection = $0 == Self.glancesSelection ? nil : $0 }
+        )
+    }
+
     var body: some View {
-        // `registry.settingsSelection` is the source of truth so the popover can
-        // deep-link into a section: nil = Glances tab, else a plugin id.
-        @Bindable var registry = registry
-        let selection = registry.settingsSelection
-
-        return VStack(spacing: 0) {
-            chipBar
-
-            Divider()
-
-            ScrollView {
-                Group {
-                    if selection == Self.menuBarSelection {
-                        menuBarTab
-                    } else if selection == Self.shortcutsSelection {
-                        ShortcutsSettingsView()
-                    } else if let plugin = registry.orderedPlugins.first(where: { $0.id == selection }) {
-                        plugin.settingsSection()
-                    } else {
-                        glancesTab
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+        } detail: {
+            detail
         }
-        .frame(width: 460, height: 420)
+        .frame(width: 620, height: 460)
     }
 
-    // MARK: - Chip bar
+    // MARK: - Sidebar
 
-    private var chipBar: some View {
-        let selection = registry.settingsSelection
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip(title: "Glances", systemImage: "square.grid.2x2", isSelected: selection == nil) {
-                    registry.settingsSelection = nil
-                }
+    private var sidebar: some View {
+        List(selection: sidebarSelection) {
+            Section("General") {
+                Label("Glances", systemImage: "square.grid.2x2")
+                    .tag(Self.glancesSelection)
+                Label("Shortcuts", systemImage: "command")
+                    .tag(Self.shortcutsSelection)
+            }
 
-                chip(title: "Menu Bar", systemImage: "menubar.rectangle", isSelected: selection == Self.menuBarSelection) {
-                    registry.settingsSelection = Self.menuBarSelection
-                }
-
-                chip(title: "Shortcuts", systemImage: "command", isSelected: selection == Self.shortcutsSelection) {
-                    registry.settingsSelection = Self.shortcutsSelection
-                }
-
+            Section("Glances") {
                 ForEach(registry.orderedPlugins, id: \.id) { plugin in
-                    chip(title: plugin.title, systemImage: plugin.iconSystemName, isSelected: selection == plugin.id) {
-                        registry.settingsSelection = plugin.id
-                    }
+                    Label(plugin.title, systemImage: plugin.iconSystemName)
+                        // Dim the disabled ones: their settings stay reachable,
+                        // but the sidebar shows at a glance what's turned off.
+                        .foregroundStyle(registry.isEnabled(plugin.id) ? .primary : .secondary)
+                        .tag(plugin.id)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+        }
+        .listStyle(.sidebar)
+    }
+
+    // MARK: - Detail
+
+    @ViewBuilder
+    private var detail: some View {
+        let selection = registry.settingsSelection
+
+        ScrollView {
+            Group {
+                if selection == Self.shortcutsSelection {
+                    ShortcutsSettingsView()
+                } else if let plugin = registry.orderedPlugins.first(where: { $0.id == selection }) {
+                    plugin.settingsSection()
+                } else {
+                    glancesPage
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle(detailTitle)
+    }
+
+    private var detailTitle: String {
+        switch registry.settingsSelection {
+        case Self.shortcutsSelection: "Shortcuts"
+        case let id?: registry.plugin(id: id)?.title ?? "Glances"
+        case nil: "Glances"
         }
     }
 
-    private func chip(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.callout.weight(isSelected ? .semibold : .regular))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-                )
-                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-    }
+    // MARK: - Glances page
 
-    // MARK: - Glances list
-
-    private var glancesTab: some View {
+    private var glancesPage: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Enable and reorder glances. Order controls the menu-bar rotation and popover layout.")
+            Text("Enable and reorder glances. Order controls the popover layout.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -119,43 +125,7 @@ struct SettingsView: View {
                     coordinator.reconcile()
                 }
             }
-            .frame(minHeight: 280)
-        }
-    }
-
-    // MARK: - Menu Bar list
-
-    /// Chooses which glances rotate through the compact status-bar readout,
-    /// independent of whether each glance is enabled in the popover.
-    private var menuBarTab: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Choose which glances rotate through the menu-bar readout. Only enabled glances can appear; each shows its icon next to its summary.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            List {
-                ForEach(registry.orderedPlugins, id: \.id) { plugin in
-                    let enabled = registry.isEnabled(plugin.id)
-                    HStack {
-                        Label(plugin.title, systemImage: plugin.iconSystemName)
-                            .foregroundStyle(enabled ? .primary : .secondary)
-                        if !enabled {
-                            Text("disabled")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { registry.isInMenuBar(plugin.id) },
-                            set: { registry.setInMenuBar(plugin.id, $0) }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .disabled(!enabled)
-                    }
-                }
-            }
-            .frame(minHeight: 280)
+            .frame(minHeight: 300)
         }
     }
 }
