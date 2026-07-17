@@ -77,6 +77,11 @@ final class ToolWindowManager {
               let index = plugins.firstIndex(where: { $0.id == current })
         else {
             // Nothing up, or what's up isn't in the ring: start at the top.
+            // A window that is up but out of the ring still has to be closed
+            // here — it is floating, and once it resigns key to the window we
+            // are about to show it will never fire `windowDidResignKey` again,
+            // so nothing else would ever take it off the screen.
+            if let current = visiblePluginID { close(pluginID: current) }
             show(plugin: plugins[0])
             return
         }

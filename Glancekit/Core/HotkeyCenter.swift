@@ -55,16 +55,6 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Key this action's binding used to be stored under, if it was renamed.
-    /// `colors` inherits the old Color Picker binding: it was the ⇧⌘1 half of
-    /// the merge, so a user who rebound it keeps their choice. The retired
-    /// Color Palette binding (⇧⌘2) is dropped.
-    var legacyStorageKey: String? {
-        switch self {
-        case .quickSwitch: nil
-        case .colors: "colorpicker"
-        }
-    }
 }
 
 /// Registers the app's global shortcuts with the system and dispatches presses.
@@ -266,10 +256,7 @@ final class HotkeyCenter {
         var result: [ShortcutAction: GlobalShortcut] = [:]
 
         for action in ShortcutAction.allCases {
-            // Fall back to the pre-rename key so a customized binding survives.
-            // The next `persist()` rewrites the whole dictionary under the
-            // current keys, retiring the old entries.
-            let raw = stored[action.rawValue] ?? action.legacyStorageKey.flatMap { stored[$0] }
+            let raw = stored[action.rawValue]
 
             guard let raw else {
                 result[action] = action.defaultShortcut // never configured
