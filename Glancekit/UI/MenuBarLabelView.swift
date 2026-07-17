@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The compact status-bar readout. Rotates through the `menuBarSummary` of each
-/// enabled plugin every few seconds; falls back to the app glyph when no plugin
-/// contributes a summary.
+/// glance the user has opted into the menu bar (see the Menu Bar settings page),
+/// every few seconds, showing that glance's icon next to its summary. Falls back
+/// to the app glyph when nothing contributes a summary.
 struct MenuBarLabelView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
@@ -12,22 +13,27 @@ struct MenuBarLabelView: View {
     @State private var didOfferOnboarding = false
     @State private var tick = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
-    private var summaries: [String] {
-        registry.enabledPluginsInOrder.compactMap { $0.menuBarSummary }
+    /// One rotating entry per summary: the glance's icon paired with that
+    /// summary. A glance may contribute several (Stocks emits one per symbol),
+    /// so the bar cycles through every entry, not one per glance.
+    private var items: [(icon: String, text: String)] {
+        registry.menuBarPluginsInOrder.flatMap { plugin in
+            plugin.menuBarSummaries.map { (plugin.iconSystemName, $0) }
+        }
     }
 
     var body: some View {
         Group {
-            let items = summaries
-            if items.isEmpty {
+            let entries = items
+            if entries.isEmpty {
                 Image(systemName: "square.grid.2x2")
             } else {
-                let safeIndex = index % items.count
-                Text(items[safeIndex])
+                let entry = entries[index % entries.count]
+                Label(entry.text, systemImage: entry.icon)
             }
         }
         .onReceive(tick) { _ in
-            let count = summaries.count
+            let count = items.count
             guard count > 0 else { return }
             index = (index + 1) % count
         }

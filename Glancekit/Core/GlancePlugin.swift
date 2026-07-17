@@ -32,6 +32,12 @@ protocol GlancePlugin: AnyObject {
     /// Return `nil` to contribute nothing to the bar (popover-only glance).
     var menuBarSummary: String? { get }
 
+    /// Every entry this glance contributes to the rotating status-bar readout,
+    /// in display order. Override when one glance has several things worth
+    /// rotating through (Stocks emits one entry per watchlist symbol). Defaults
+    /// to the single `menuBarSummary`, so most glances need not implement it.
+    var menuBarSummaries: [String] { get }
+
     /// Fetch/recompute this glance's data. Called on the main actor by the
     /// `RefreshCoordinator`. Must not throw — handle and surface errors
     /// internally (e.g. store an error string for the popover).
@@ -54,5 +60,6 @@ extension GlancePlugin {
     func settingsSection() -> AnyView { AnyView(EmptyView()) }
     var refreshInterval: TimeInterval { 0 }
     var menuBarSummary: String? { nil }
+    var menuBarSummaries: [String] { menuBarSummary.map { [$0] } ?? [] }
     var requiredPermissions: [GlancePermission] { [] }
 }

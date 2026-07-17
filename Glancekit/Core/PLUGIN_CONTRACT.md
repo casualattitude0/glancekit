@@ -14,14 +14,18 @@ protocol GlancePlugin: AnyObject {
     var iconSystemName: String { get }     // SF Symbol
     var refreshInterval: TimeInterval { get }  // seconds; 0 = refresh once on start only
     var menuBarSummary: String? { get }    // compact status-bar text; nil = popover-only
+    var menuBarSummaries: [String] { get } // several rotating entries; defaults to [menuBarSummary]
     func refresh() async                   // fetch/recompute; never throws — store errors internally
     func popoverSection() -> AnyView       // rich popover content
     func settingsSection() -> AnyView      // per-glance settings (defaults to empty)
 }
 ```
 
-Defaults exist for `refreshInterval` (0), `menuBarSummary` (nil), and
-`settingsSection()` (empty) — override only what you need.
+Defaults exist for `refreshInterval` (0), `menuBarSummary` (nil),
+`menuBarSummaries` (the single `menuBarSummary`), and `settingsSection()`
+(empty) — override only what you need. Override `menuBarSummaries` only when one
+glance has several things worth rotating through; Stocks emits one entry per
+watchlist symbol.
 
 ## Rules (non-negotiable)
 

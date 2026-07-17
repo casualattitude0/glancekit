@@ -8,6 +8,11 @@ struct SettingsView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
 
+    /// Sentinel `settingsSelection` values for the pages that aren't a plugin's
+    /// own section (nil = Glances, a plugin id = that plugin's section).
+    private static let menuBarSelection = "__menubar__"
+    private static let shortcutsSelection = "__shortcuts__"
+
     var body: some View {
         // `registry.settingsSelection` is the source of truth so the popover can
         // deep-link into a section: nil = Glances tab, else a plugin id.
@@ -21,7 +26,11 @@ struct SettingsView: View {
 
             ScrollView {
                 Group {
-                    if let plugin = registry.orderedPlugins.first(where: { $0.id == selection }) {
+                    if selection == Self.menuBarSelection {
+                        menuBarTab
+                    } else if selection == Self.shortcutsSelection {
+                        ShortcutsSettingsView()
+                    } else if let plugin = registry.orderedPlugins.first(where: { $0.id == selection }) {
                         plugin.settingsSection()
                     } else {
                         glancesTab
@@ -42,6 +51,14 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 chip(title: "Glances", systemImage: "square.grid.2x2", isSelected: selection == nil) {
                     registry.settingsSelection = nil
+                }
+
+                chip(title: "Menu Bar", systemImage: "menubar.rectangle", isSelected: selection == Self.menuBarSelection) {
+                    registry.settingsSelection = Self.menuBarSelection
+                }
+
+                chip(title: "Shortcuts", systemImage: "command", isSelected: selection == Self.shortcutsSelection) {
+                    registry.settingsSelection = Self.shortcutsSelection
                 }
 
                 ForEach(registry.orderedPlugins, id: \.id) { plugin in
@@ -100,6 +117,42 @@ struct SettingsView: View {
                 .onMove { offsets, dest in
                     registry.move(fromOffsets: offsets, toOffset: dest)
                     coordinator.reconcile()
+                }
+            }
+            .frame(minHeight: 280)
+        }
+    }
+
+    // MARK: - Menu Bar list
+
+    /// Chooses which glances rotate through the compact status-bar readout,
+    /// independent of whether each glance is enabled in the popover.
+    private var menuBarTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Choose which glances rotate through the menu-bar readout. Only enabled glances can appear; each shows its icon next to its summary.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            List {
+                ForEach(registry.orderedPlugins, id: \.id) { plugin in
+                    let enabled = registry.isEnabled(plugin.id)
+                    HStack {
+                        Label(plugin.title, systemImage: plugin.iconSystemName)
+                            .foregroundStyle(enabled ? .primary : .secondary)
+                        if !enabled {
+                            Text("disabled")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { registry.isInMenuBar(plugin.id) },
+                            set: { registry.setInMenuBar(plugin.id, $0) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!enabled)
+                    }
                 }
             }
             .frame(minHeight: 280)
