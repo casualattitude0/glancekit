@@ -24,7 +24,8 @@ Glancekit lives in your menu bar and surfaces at-a-glance information from a gro
 | GitHub | Your recent GitHub activity |
 | Photos | A rotating look at your library |
 | System | CPU, memory, and other system stats |
-| Time & Productivity | Time-of-day and productivity glance |
+| Time & Productivity | World clocks, your next event, reminders, a countdown |
+| Pomodoro | Focus/break cycles with long breaks and a session tally |
 | Colors | Eyedrop any pixel, dial in a shade, keep favorites |
 | Custom API | Point a glance at any JSON endpoint |
 
@@ -51,9 +52,57 @@ cd glancekit
 The script builds with `xcodebuild` and packages the app into a disk image with a
 drag-to-install Applications shortcut. Use `-o <path>` to change the output location.
 
+### Build and install for development
+
+```bash
+scripts/install.sh       # build, install to /Applications, refresh the widget daemon
+```
+
+This is the only sanctioned way to get a smoke-testable install into
+`/Applications`. It updates `/Applications/Glancekit.app` in place, so widgets you
+have already placed keep their saved settings. Smoke-test
+`/Applications/Glancekit.app` and nothing else: any other copy of the app
+re-registers the same widget extension bundle id and can shadow the installed one,
+which makes the widget gallery serve a stale widget that ignores its saved config.
+
+Two things to know before you run it:
+
+- **It builds `-configuration Debug`**, not Release. If you need a Release build,
+  use `./make-dmg.sh`.
+- **It deletes competing copies, it does not just unregister them.** The script
+  lists every `*/Glancekit.app` in the `lsregister` dump, and for each path that is
+  not `/Applications/Glancekit.app` or its own fresh build it runs
+  `lsregister -u` **and `rm -rf`**. That reaches any Glancekit.app anywhere on
+  disk, including `~/Downloads/Glancekit.app` unpacked from a `.dmg` and a mounted
+  `/Volumes/Glancekit/Glancekit.app`. It prints each path as it removes it. Move
+  copies you want to keep out of the way, or rename them, before running it.
+
 ### Open in Xcode
 
 Open `Glancekit.xcodeproj`, select the **Glancekit** scheme, and run.
+
+Use this for editing, debugging, and previews. Know what a Run costs you:
+
+- It builds into `~/Library/Developer/Xcode/DerivedData`, which is Spotlight
+  indexed, so a second **Glancekit** icon appears in Launchpad next to the one
+  from `/Applications`.
+- The DerivedData copy registers the same widget extension bundle id and can win
+  over `/Applications/Glancekit.app`. The widget then renders from the stale
+  DerivedData build and ignores its saved config.
+
+So do not treat an Xcode Run as an install, and do not smoke-test its build
+product. Check for extra copies with:
+
+```bash
+mdfind "kMDItemFSName == 'Glancekit.app'"
+```
+
+The purge loop in `scripts/install.sh` removes the DerivedData copy on your next
+install, which puts `/Applications/Glancekit.app` back in charge. Deleting the
+DerivedData bundle by hand only lasts until the next Run.
+
+See [`CLAUDE.md`](CLAUDE.md) for the full rules on build locations and what does
+not fix this.
 
 ## Writing your own glance
 
@@ -83,8 +132,9 @@ Glancekit/
   UI/          Menu bar, popover, onboarding
   Settings/    Settings window
 GlancekitWidgets/   WidgetKit extension
+scripts/
+  install.sh        Build & install straight to /Applications (dev helper)
 make-dmg.sh         Build & package a distributable .dmg
-install.sh          Build & install straight to /Applications (dev helper)
 ```
 
 ## License
