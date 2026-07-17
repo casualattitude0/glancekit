@@ -25,27 +25,31 @@ Glancekit lives in your menu bar and surfaces compact, at-a-glance information f
 | Photos | A rotating look at your library |
 | System | CPU, memory, and other system stats |
 | Time & Productivity | Time-of-day and productivity glance |
-| Color Picker / Color Palette | Quick color tools |
+| Colors | Eyedrop any pixel, dial in a shade, keep favorites |
 | Custom API | Point a glance at any JSON endpoint |
 
 ## Install
 
-### Build & install from source
+### From the `.dmg`
+
+1. Download `Glancekit.dmg` and open it.
+2. Drag **Glancekit** onto the **Applications** folder.
+3. Launch Glancekit from Applications — it appears in your menu bar.
+
+> Because the app is ad-hoc signed (not notarized), the first launch may show a
+> Gatekeeper warning. Right-click the app and choose **Open**, or allow it under
+> System Settings ▸ Privacy & Security.
+
+### Build the `.dmg` yourself
 
 ```bash
 git clone https://github.com/casualattitude0/glancekit.git
 cd glancekit
-./install.sh            # build in Release, install to /Applications, and launch
+./make-dmg.sh            # build in Release, package -> dist/Glancekit.dmg
 ```
 
-Options:
-
-```bash
-./install.sh --login       # also add Glancekit as a login item (auto-start)
-./install.sh --no-launch   # install but don't launch afterwards
-```
-
-The script builds with `xcodebuild`, installs to `/Applications`, clears the Gatekeeper quarantine flag, and (optionally) registers a login item.
+The script builds with `xcodebuild` and packages the app into a disk image with a
+drag-to-install Applications shortcut. Use `-o <path>` to change the output location.
 
 ### Open in Xcode
 
@@ -80,7 +84,8 @@ Glancekit/
   UI/          Menu bar, popover, onboarding
   Settings/    Settings window
 GlancekitWidgets/   WidgetKit extension
-install.sh          Build & install helper
+make-dmg.sh         Build & package a distributable .dmg
+install.sh          Build & install straight to /Applications (dev helper)
 ```
 
 ## License
