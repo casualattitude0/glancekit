@@ -112,11 +112,30 @@ final class PluginRegistry {
         persist()
     }
 
-    /// Move a plugin within the ordered list (for drag-to-reorder in Settings).
-    func move(fromOffsets: IndexSet, toOffset: Int) {
-        var ids = orderedPlugins.map { $0.id }
-        ids.move(fromOffsets: fromOffsets, toOffset: toOffset)
-        orderedIDs = ids
+    /// Plugins the user has disabled, in the user's chosen order. Disabled
+    /// glances keep their slot in `orderedIDs`, so re-enabling one drops it back
+    /// where it was rather than at the end.
+    var disabledPluginsInOrder: [any GlancePlugin] {
+        orderedPlugins.filter { !enabledIDs.contains($0.id) }
+    }
+
+    /// Move a plugin within one half of the list (for drag-to-reorder in
+    /// Settings, which lists the enabled and disabled glances as separate
+    /// groups). Offsets are relative to that group alone.
+    ///
+    /// The moved ids are written back into the slots that group already occupied
+    /// in `orderedIDs`, so reordering the enabled glances never shifts a disabled
+    /// one out from between its neighbors — it stays put and keeps the position
+    /// it will reappear at when switched back on.
+    func move(enabled: Bool, fromOffsets: IndexSet, toOffset: Int) {
+        var group = (enabled ? enabledPluginsInOrder : disabledPluginsInOrder).map { $0.id }
+        group.move(fromOffsets: fromOffsets, toOffset: toOffset)
+
+        // Only ids that resolved to a registered plugin are in `group`; matching
+        // on that set keeps a stale id in `orderedIDs` from consuming a slot.
+        let slots = Set(group)
+        var next = group.makeIterator()
+        orderedIDs = orderedIDs.map { slots.contains($0) ? (next.next() ?? $0) : $0 }
         persist()
     }
 

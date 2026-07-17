@@ -119,30 +119,49 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            // Two groups rather than one mixed list: the enabled order is the
+            // only one that shows up in the popover, so dragging is worth doing
+            // among those rows alone. A disabled glance keeps its slot behind the
+            // scenes and returns to it when switched back on.
             List {
-                ForEach(registry.orderedPlugins, id: \.id) { plugin in
-                    HStack {
-                        Image(systemName: "line.3.horizontal")
-                            .foregroundStyle(.tertiary)
-                        Label(plugin.title, systemImage: plugin.iconSystemName)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { registry.isEnabled(plugin.id) },
-                            set: { newValue in
-                                registry.setEnabled(plugin.id, newValue)
+                if !registry.enabledPluginsInOrder.isEmpty {
+                    Section("Enabled") {
+                        ForEach(registry.enabledPluginsInOrder, id: \.id, content: row)
+                            .onMove { offsets, dest in
+                                registry.move(enabled: true, fromOffsets: offsets, toOffset: dest)
                                 coordinator.reconcile()
                             }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
                     }
                 }
-                .onMove { offsets, dest in
-                    registry.move(fromOffsets: offsets, toOffset: dest)
-                    coordinator.reconcile()
+
+                if !registry.disabledPluginsInOrder.isEmpty {
+                    Section("Disabled") {
+                        ForEach(registry.disabledPluginsInOrder, id: \.id, content: row)
+                            .onMove { offsets, dest in
+                                registry.move(enabled: false, fromOffsets: offsets, toOffset: dest)
+                            }
+                    }
                 }
             }
             .frame(minHeight: 300)
+        }
+    }
+
+    private func row(_ plugin: any GlancePlugin) -> some View {
+        HStack {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+            Label(plugin.title, systemImage: plugin.iconSystemName)
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { registry.isEnabled(plugin.id) },
+                set: { newValue in
+                    registry.setEnabled(plugin.id, newValue)
+                    coordinator.reconcile()
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
         }
     }
 
