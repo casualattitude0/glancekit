@@ -11,7 +11,7 @@ Glancekit lives in your menu bar and surfaces at-a-glance information from a gro
 - **Menu bar first** — an unobtrusive status-bar icon, a detailed popover on click.
 - **Modular glances** — each glance is a self-contained plugin that touches only its own folder.
 - **Home Screen / Notification Center widgets** — via the bundled WidgetKit extension.
-- **Secure by default** — secrets go through a dedicated `CredentialStore` (Keychain), never `UserDefaults`.
+- **Secrets kept out of preferences** — secrets go through a dedicated `CredentialStore`, which keeps them in a `0600` file in Application Support, never `UserDefaults`. This guards against other users on the machine, not against code running as you; `CredentialStore.swift` documents the trade-off.
 - **Independent refresh** — every glance sets its own refresh interval; a shared coordinator handles the rest.
 - **Per-glance settings** — configure each glance from a unified Settings window.
 

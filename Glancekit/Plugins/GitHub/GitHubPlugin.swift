@@ -8,8 +8,6 @@ import Observation
 ///   Settings and stored in `CredentialStore` under `"github.pat.<uuid>"` via
 ///   `CredentialStore`. Account metadata (id + label) lives in `UserDefaults`
 ///   via `GitHubAccountStore`; tokens never reach app preferences.
-/// - Menu-bar: total unread across all accounts, e.g. "GH 3●"; `nil` when there
-///   are no accounts or the total is zero.
 /// - Popover: per-account Contributions + Notifications + My PRs sections, or a
 ///   friendly prompt to add an account when none are configured.
 @MainActor
