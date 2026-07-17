@@ -35,8 +35,8 @@ enum CredentialStore {
         ]
     }
 
-    /// A legacy-keychain access object whose decrypt ACL trusts *any* application
-    /// with *no* password prompt.
+    /// A legacy-keychain access object whose ACLs trust *any* application with
+    /// *no* password prompt.
     ///
     /// This app is ad-hoc signed (`CODE_SIGN_IDENTITY = "-"`), so its code
     /// signature changes on every rebuild. A default ACL trusts only the creating
@@ -47,15 +47,24 @@ enum CredentialStore {
     /// read these secrets without a prompt. Acceptable for a local, unsandboxed,
     /// non-distributed dev app; revisit if the app ever ships team-signed/sandboxed
     /// (switch to the data-protection keychain, per the type note above).
+    ///
+    /// Every authorization is relaxed, not just decrypt: `SecAccessCreate` leaves
+    /// `change_acl` trusting an *empty* application list, which locks the ACL so
+    /// hard that even this app cannot rewrite it without a keychain-password
+    /// prompt.
     private static func promptFreeAccess() -> SecAccess? {
         var access: SecAccess?
         guard SecAccessCreate(service as CFString, [] as CFArray, &access) == errSecSuccess,
               let access else { return nil }
-        let acls = SecAccessCopyMatchingACLList(access, kSecACLAuthorizationDecrypt) as? [SecACL]
-        for acl in acls ?? [] {
-            // nil trusted-application list == any application; empty prompt
-            // selector == no password prompt.
-            SecACLSetContents(acl, nil, "" as CFString, [])
+        for authorization in [kSecACLAuthorizationDecrypt,
+                              kSecACLAuthorizationEncrypt,
+                              kSecACLAuthorizationChangeACL] {
+            let acls = SecAccessCopyMatchingACLList(access, authorization) as? [SecACL]
+            for acl in acls ?? [] {
+                // nil trusted-application list == any application; empty prompt
+                // selector == no password prompt.
+                SecACLSetContents(acl, nil, "" as CFString, [])
+            }
         }
         return access
     }
@@ -69,20 +78,21 @@ enum CredentialStore {
         let data = Data(value.utf8)
         let query = baseQuery(for: key)
 
-        let access = promptFreeAccess()
-
         // Existence check uses no `kSecReturnData`, so it never triggers a decrypt
         // prompt on its own.
         let existing = SecItemCopyMatching(query as CFDictionary, nil)
         let status: OSStatus
         if existing == errSecSuccess {
-            var attributes: [String: Any] = [kSecValueData as String: data]
-            if let access { attributes[kSecAttrAccess as String] = access }
+            // No `kSecAttrAccess` here: it is only honoured by `SecItemAdd`, and
+            // supplying it asks to rewrite the item's ACL, which needs the
+            // change-ACL authorization and pops a keychain-password prompt on
+            // every overwrite. The access set at creation time already applies.
+            let attributes: [String: Any] = [kSecValueData as String: data]
             status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         } else {
             var addQuery = query
             addQuery[kSecValueData as String] = data
-            if let access { addQuery[kSecAttrAccess as String] = access }
+            if let access = promptFreeAccess() { addQuery[kSecAttrAccess as String] = access }
             status = SecItemAdd(addQuery as CFDictionary, nil)
         }
         lastStatus = status
