@@ -20,7 +20,13 @@ final class PomodoroPlugin: GlancePlugin {
     /// Surfaces a running timer with its remaining time. A running focus/break
     /// clock is worth keeping in view; a stopped timer stays quiet.
     func currentSignal() -> GlanceSignal? {
-        guard timer.isRunning else { return nil }
+        guard timer.isRunning else {
+            // Stopped, but if you've focused today, a quiet tally stays on the feed.
+            guard timer.sessionsToday > 0 else { return nil }
+            return GlanceSignal(priority: .ambient, score: 0,
+                                headline: "\(timer.sessionsToday) focus session\(timer.sessionsToday == 1 ? "" : "s") today",
+                                systemImage: iconSystemName, tint: .secondary)
+        }
         let tint: Color = timer.phase.isBreak ? .green : .red
         let timer = self.timer
         return GlanceSignal(priority: .elevated, score: 0,

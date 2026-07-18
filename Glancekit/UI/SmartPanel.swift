@@ -25,8 +25,9 @@ struct SmartPanelView: View {
     /// Pinned to the footer, so they're excluded from the ranked feed above.
     private static let pinnedIDs: Set<String> = ["ai", "notes"]
 
-    /// Soft ceiling on cards, so a busy machine still reads at a glance.
-    private static let cardCap = 6
+    /// Soft ceiling on cards. Generous, so the dynamic feed shows the whole
+    /// picture — every glance that has something to say — not just the top few.
+    private static let cardCap = 10
 
     var body: some View {
         let context = PanelContext()
@@ -82,17 +83,17 @@ struct SmartPanelView: View {
             )
             .padding(.vertical, 24)
         } else {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 6) {
-                    ForEach(ranked) { item in
-                        SignalCard(ranked: item, delta: deltas[item.plugin.id] ?? .none) {
-                            open(item.plugin)
-                        }
+            // No scroll view: the panel grows to fit every card, so nothing hides
+            // below a fold the user can't see. The feed is naturally bounded by
+            // how many glances have something to say.
+            VStack(spacing: 6) {
+                ForEach(ranked) { item in
+                    SignalCard(ranked: item, delta: deltas[item.plugin.id] ?? .none) {
+                        open(item.plugin)
                     }
                 }
-                .padding(12)
             }
-            .frame(maxHeight: 400)
+            .padding(12)
         }
     }
 
@@ -114,23 +115,18 @@ struct RankedSignal: Identifiable {
     @MainActor var id: String { plugin.id }
 }
 
-/// Rank the glances' current signals for the feed: every notable signal
-/// (`normal` and up) is kept, sorted by urgency then score; quiet `ambient`
-/// signals only backfill leftover room up to `cap`, and only when there are
-/// fewer than two notable cards — so a busy panel stays focused and a calm one
-/// still shows something useful.
+/// Rank the glances' current signals for the feed. Every glance that reports a
+/// signal gets a card, sorted by urgency then score — the urgent things rise to
+/// the top and the quiet `ambient` readings fill in beneath them, up to `cap`.
+/// So the dynamic panel shows the full picture at a glance while still leading
+/// with what matters most.
 @MainActor
 func rankedSignals(from plugins: [any GlancePlugin], cap: Int) -> [RankedSignal] {
-    let all = plugins
+    plugins
         .compactMap { plugin in plugin.currentSignal().map { RankedSignal(plugin: plugin, signal: $0) } }
         .sorted { ($0.signal.priority, $0.signal.score) > ($1.signal.priority, $1.signal.score) }
-
-    let notable = all.filter { $0.signal.priority > .ambient }
-    let ambient = all.filter { $0.signal.priority == .ambient }
-    // Keep ambient filler restrained: it's there to avoid an empty panel, not to
-    // pad a busy one.
-    let ambientRoom = notable.count >= 2 ? 0 : max(0, min(cap - notable.count, 2))
-    return Array((notable + ambient.prefix(ambientRoom)).prefix(cap))
+        .prefix(cap)
+        .map { $0 }
 }
 
 // MARK: - Brief bar

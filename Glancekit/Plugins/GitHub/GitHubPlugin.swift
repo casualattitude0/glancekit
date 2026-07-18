@@ -128,7 +128,15 @@ final class GitHubPlugin: GlancePlugin {
         let failing = accountData.reduce(0) { sum, data in
             sum + data.ciStatus.values.filter { $0 == "failure" || $0 == "error" }.count
         }
-        guard unread > 0 || failing > 0 else { return nil }
+        guard unread > 0 || failing > 0 else {
+            // Nothing pressing — but if accounts are configured and healthy, a
+            // quiet "all caught up" card keeps GitHub on the feed.
+            let openPRs = accountData.reduce(0) { $0 + $1.pullRequests.count }
+            guard !accountData.isEmpty, accountData.allSatisfy({ $0.error == nil }) else { return nil }
+            return GlanceSignal(priority: .ambient, score: 0,
+                                headline: openPRs > 0 ? "Inbox clear · \(openPRs) open PR\(openPRs == 1 ? "" : "s")" : "All caught up",
+                                systemImage: iconSystemName, tint: .secondary)
+        }
 
         var parts: [String] = []
         if unread > 0 { parts.append("\(unread) unread") }

@@ -162,9 +162,18 @@ final class TimeProductivityPlugin: GlancePlugin {
     /// Surfaces the next calendar event as it approaches: urgent inside 15
     /// minutes, elevated inside an hour, an ambient heads-up further out.
     func currentSignal() -> GlanceSignal? {
-        guard calendarEnabled, let event = nextEvent else { return nil }
+        guard calendarEnabled, let event = nextEvent,
+              event.startDate.timeIntervalSinceNow / 60 > -5 else {
+            // No imminent event — but open reminders keep a quiet card on the feed.
+            if remindersEnabled, !reminders.isEmpty {
+                return GlanceSignal(priority: .ambient, score: 0,
+                                    headline: "\(reminders.count) open reminder\(reminders.count == 1 ? "" : "s")",
+                                    detail: reminders.first?.title,
+                                    systemImage: "checklist", tint: .secondary)
+            }
+            return nil
+        }
         let minutes = event.startDate.timeIntervalSinceNow / 60
-        guard minutes > -5 else { return nil }  // already well underway
 
         let priority: GlanceSignal.Priority
         if minutes <= 15 { priority = .urgent }
