@@ -251,7 +251,7 @@ struct SettingsView: View {
 
     private var isUpdateBusy: Bool {
         switch updater.phase {
-        case .checking, .downloading: return true
+        case .checking, .downloading, .installing, .relaunching: return true
         default: return false
         }
     }
@@ -264,6 +264,8 @@ struct SettingsView: View {
         // are arriving, but nothing here knows how many are left.
         case .downloading(let progress?): return "Downloading update… \(Int(progress * 100))%"
         case .downloading: return "Downloading update…"
+        case .installing: return "Installing update…"
+        case .relaunching: return "Update installed — relaunching…"
         case .upToDate: return "You're on the latest version (\(updater.currentVersion))"
         case .downloaded(let url): return "Downloaded to \(url.lastPathComponent)"
         case .updateAvailable(let r): return "Version \(r.version) available — opened the release page"
