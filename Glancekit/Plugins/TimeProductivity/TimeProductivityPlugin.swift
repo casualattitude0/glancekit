@@ -159,6 +159,32 @@ final class TimeProductivityPlugin: GlancePlugin {
         }
     }
 
+    /// Surfaces the next calendar event as it approaches: urgent inside 15
+    /// minutes, elevated inside an hour, an ambient heads-up further out.
+    func currentSignal() -> GlanceSignal? {
+        guard calendarEnabled, let event = nextEvent else { return nil }
+        let minutes = event.startDate.timeIntervalSinceNow / 60
+        guard minutes > -5 else { return nil }  // already well underway
+
+        let priority: GlanceSignal.Priority
+        if minutes <= 15 { priority = .urgent }
+        else if minutes <= 60 { priority = .elevated }
+        else { priority = .ambient }
+
+        let tint: Color = priority == .urgent ? .orange : .accentColor
+        // A one-click Join when the event carries a meeting link and the feature's on.
+        var join: GlanceSignal.QuickAction?
+        if meetingJoinEnabled, let url = event.meetingURL {
+            join = GlanceSignal.QuickAction(title: "Join", systemImage: "video") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        return GlanceSignal(priority: priority,
+                            score: max(0, 1440 - minutes),  // sooner sorts first
+                            headline: "\(event.title) · \(Self.relativeShort(event.startDate))",
+                            systemImage: "calendar", tint: tint, quickAction: join)
+    }
+
     func popoverSection() -> AnyView {
         AnyView(TimeProdPopover(plugin: self))
     }

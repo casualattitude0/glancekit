@@ -147,6 +147,74 @@ final class SystemStatsPlugin: GlancePlugin {
         lastError = nil
     }
 
+    /// Surfaces the single most severe reading among the *enabled* metrics:
+    /// memory pressure, a low battery, a nearly-full disk, or a pegged CPU. When
+    /// nothing is alarming, an ambient CPU/RAM one-liner keeps the Mac's health
+    /// on the feed without shouting.
+    func currentSignal() -> GlanceSignal? {
+        var candidates: [GlanceSignal] = []
+
+        // Memory pressure.
+        if isEnabled(.ram), let used = memoryUsedBytes, let total = memoryTotalBytes, total > 0 {
+            let ratio = Double(used) / Double(total)
+            let headline = "Memory \(Int(ratio * 100))% · \(Self.formatBytes(used)) / \(Self.formatBytes(total))"
+            if ratio >= 0.90 {
+                candidates.append(GlanceSignal(priority: .urgent, score: ratio,
+                    headline: headline, detail: "Memory is nearly full", systemImage: "memorychip",
+                    tint: .red, accessory: .gauge(ratio)))
+            } else if ratio >= 0.75 {
+                candidates.append(GlanceSignal(priority: .elevated, score: ratio,
+                    headline: headline, systemImage: "memorychip", tint: .orange, accessory: .gauge(ratio)))
+            }
+        }
+
+        // Low battery (only meaningful while discharging).
+        if isEnabled(.battery), let b = batteryInfo, !b.isCharging {
+            let pct = Double(b.percentage)
+            if b.percentage <= 10 {
+                candidates.append(GlanceSignal(priority: .urgent, score: 100 - pct,
+                    headline: "Battery \(b.percentage)%", detail: "Plug in soon", systemImage: "battery.25",
+                    tint: .red, accessory: .gauge(pct / 100)))
+            } else if b.percentage <= 20 {
+                candidates.append(GlanceSignal(priority: .elevated, score: 100 - pct,
+                    headline: "Battery \(b.percentage)%", systemImage: "battery.25",
+                    tint: .orange, accessory: .gauge(pct / 100)))
+            }
+        }
+
+        // Disk almost full.
+        if isEnabled(.disk), let free = diskFreeBytes {
+            let gb = Double(free) / 1_073_741_824
+            if gb <= 5 {
+                candidates.append(GlanceSignal(priority: .urgent, score: 100 - gb,
+                    headline: String(format: "Disk %.1f GB free", gb), detail: "Running out of space", systemImage: "internaldrive", tint: .red))
+            } else if gb <= 15 {
+                candidates.append(GlanceSignal(priority: .elevated, score: 100 - gb,
+                    headline: String(format: "Disk %.1f GB free", gb), systemImage: "internaldrive", tint: .orange))
+            }
+        }
+
+        // CPU pegged.
+        if isEnabled(.cpu), let cpu = cpuUsagePercent, cpu >= 90 {
+            candidates.append(GlanceSignal(priority: .elevated, score: cpu,
+                headline: String(format: "CPU %.0f%%", cpu), detail: "Under heavy load", systemImage: "cpu", tint: .orange))
+        }
+
+        if let worst = candidates.max(by: { ($0.priority, $0.score) < ($1.priority, $1.score) }) {
+            return worst
+        }
+
+        // Nothing alarming: a quiet health summary, shown only if there's feed room.
+        var parts: [String] = []
+        if isEnabled(.cpu), let cpu = cpuUsagePercent { parts.append(String(format: "CPU %.0f%%", cpu)) }
+        if isEnabled(.ram), let used = memoryUsedBytes, let total = memoryTotalBytes, total > 0 {
+            parts.append("RAM \(Int(Double(used) / Double(total) * 100))%")
+        }
+        guard !parts.isEmpty else { return nil }
+        return GlanceSignal(priority: .ambient, score: 0,
+            headline: parts.joined(separator: " · "), systemImage: "cpu", tint: .secondary)
+    }
+
     func popoverSection() -> AnyView {
         AnyView(SystemStatsPopover(plugin: self))
     }

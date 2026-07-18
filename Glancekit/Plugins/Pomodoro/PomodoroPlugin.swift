@@ -17,6 +17,22 @@ final class PomodoroPlugin: GlancePlugin {
 
     func refresh() async {}
 
+    /// Surfaces a running timer with its remaining time. A running focus/break
+    /// clock is worth keeping in view; a stopped timer stays quiet.
+    func currentSignal() -> GlanceSignal? {
+        guard timer.isRunning else { return nil }
+        let tint: Color = timer.phase.isBreak ? .green : .red
+        let timer = self.timer
+        return GlanceSignal(priority: .elevated, score: 0,
+                            headline: "\(timer.phase.title) · \(timer.remainingText)",
+                            detail: "Next: \(timer.nextPhase.title)",
+                            systemImage: timer.phase.symbol, tint: tint,
+                            accessory: .gauge(timer.progress),
+                            quickAction: GlanceSignal.QuickAction(
+                                title: "Pause", systemImage: "pause.fill",
+                                run: { timer.toggle() }))
+    }
+
     func popoverSection() -> AnyView { AnyView(PomodoroPopover(timer: timer)) }
     func settingsSection() -> AnyView { AnyView(PomodoroSettings(timer: timer)) }
 }
