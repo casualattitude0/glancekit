@@ -41,10 +41,16 @@ protocol GlancePlugin: AnyObject {
 
     /// Per-glance controls shown in the Settings window. Defaults to empty.
     func settingsSection() -> AnyView
+
+    /// The size the standalone tool window should open at for this glance.
+    /// Return `nil` to use the default. A glance with a real editing surface
+    /// (e.g. Notes) can ask for more room; most glances don't need to.
+    var preferredToolWindowSize: CGSize? { get }
 }
 
 extension GlancePlugin {
     func settingsSection() -> AnyView { AnyView(EmptyView()) }
     var refreshInterval: TimeInterval { 0 }
     var requiredPermissions: [GlancePermission] { [] }
+    var preferredToolWindowSize: CGSize? { nil }
 }

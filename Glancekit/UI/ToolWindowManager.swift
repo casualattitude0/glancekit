@@ -168,8 +168,12 @@ final class ToolWindowManager {
     private func makeWindow(for plugin: any GlancePlugin) -> NSWindow {
         let pluginID = plugin.id
 
+        // Most glances open at the default; ones with a real editing surface can
+        // ask for more room via `preferredToolWindowSize`.
+        let size = plugin.preferredToolWindowSize ?? CGSize(width: 360, height: 520)
+
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -187,7 +191,7 @@ final class ToolWindowManager {
         // the window would deallocate it and reopening would crash.
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(
-            rootView: ToolWindowContent(plugin: plugin) { [weak self] in
+            rootView: ToolWindowContent(plugin: plugin, contentSize: size) { [weak self] in
                 self?.close(pluginID: pluginID)
             }
         )
@@ -246,6 +250,7 @@ private final class ToolWindowDelegate: NSObject, NSWindowDelegate {
 /// an explicit Close button.
 private struct ToolWindowContent: View {
     let plugin: any GlancePlugin
+    var contentSize: CGSize = CGSize(width: 360, height: 520)
     let onClose: () -> Void
 
     var body: some View {
@@ -277,6 +282,7 @@ private struct ToolWindowContent: View {
         }
         // Leaves room for the transparent titlebar the content draws under.
         .padding(.top, 28)
-        .frame(minWidth: 360, minHeight: 420)
+        // Reserve ~100pt for the titlebar + close-button chrome around the body.
+        .frame(minWidth: contentSize.width, minHeight: contentSize.height - 100)
     }
 }
