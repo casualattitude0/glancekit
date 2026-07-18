@@ -22,6 +22,9 @@ final class AIPlugin: GlancePlugin {
 
     init(registry: PluginRegistry, coordinator: RefreshCoordinator) {
         self.conversation = AIConversation(registry: registry, coordinator: coordinator)
+        // Bring up any configured MCP servers so their tools are ready when the
+        // user first chats. No-op when none are configured.
+        MCPStore.shared.connectEnabled()
     }
 
     func refresh() async {}

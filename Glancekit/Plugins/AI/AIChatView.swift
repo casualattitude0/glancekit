@@ -36,6 +36,10 @@ private struct AIChatBody: View {
                 AIErrorBanner(message: error) { conversation.lastError = nil }
             }
 
+            if let request = AIApprovalGate.shared.pending {
+                AIApprovalBanner(request: request)
+            }
+
             Divider()
 
             if conversation.isConfigured {
@@ -296,6 +300,46 @@ private struct AIErrorBanner: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// The in-chat consent prompt shown while a mutating or external (MCP) tool call
+/// is blocked on the user's decision. Wired to `AIApprovalGate.shared`.
+private struct AIApprovalBanner: View {
+    let request: AIApprovalGate.Request
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: request.isMCP ? "network.badge.shield.half.filled" : "hand.raised.fill")
+                    .foregroundStyle(.orange)
+                Text(request.isMCP ? "Run external tool?" : "Allow this action?")
+                    .font(.caption.weight(.semibold))
+            }
+            Text(request.displayName)
+                .font(.caption.monospaced())
+                .foregroundStyle(.primary)
+            Text(request.argsSummary)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Deny") { AIApprovalGate.shared.resolve(.deny) }
+                    .controlSize(.small)
+                Button("Allow once") { AIApprovalGate.shared.resolve(.allowOnce) }
+                    .controlSize(.small)
+                Button("Always allow") { AIApprovalGate.shared.resolve(.allowAlways) }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 }
