@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import CoreLocation
 
 /// Weather glance backed by the free, keyless Open-Meteo API.
 ///
@@ -54,6 +55,7 @@ final class WeatherPlugin: GlancePlugin {
     private(set) var lastError: String?
 
     private let network = NetworkClient()
+    @ObservationIgnored private lazy var locationFetcher = DeviceLocationFetcher()
 
     init() {
         latitude = UserDefaults.standard.string(forKey: latKey) ?? "37.77"
@@ -81,6 +83,32 @@ final class WeatherPlugin: GlancePlugin {
         longitude = String(place.longitude)
         placeName = place.displayName
         await refresh()
+    }
+
+    /// Ask macOS for the device's current location (prompting for permission the
+    /// first time), adopt those coordinates, reverse-geocode a display name, and
+    /// refresh. On denial/failure the reason lands in `lastError`.
+    func useDeviceLocation() async {
+        do {
+            let location = try await locationFetcher.currentLocation()
+            latitude = String(location.coordinate.latitude)
+            longitude = String(location.coordinate.longitude)
+            placeName = (try? await Self.reverseGeocode(location)) ?? "My Location"
+            await refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Best-effort "City, Region, Country" label for a coordinate. Falls back to
+    /// "My Location" when the geocoder returns nothing usable.
+    private static func reverseGeocode(_ location: CLLocation) async throws -> String {
+        let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
+        guard let p = placemarks.first else { return "My Location" }
+        let parts = [p.locality ?? p.name, p.administrativeArea, p.country]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? "My Location" : parts.joined(separator: ", ")
     }
 
     // MARK: GlancePlugin
@@ -240,6 +268,95 @@ private struct GeocodingResponse: Decodable {
     let results: [GeoPlace]?
 }
 
+// MARK: - Device location
+
+/// One-shot Core Location wrapper: asks for authorization if needed, then
+/// resolves a single fix. Bridges CLLocationManager's delegate callbacks into
+/// an `async` call. Lives on the main actor since CLLocationManager expects a
+/// run loop; the delegate callbacks hop back on before touching state.
+@MainActor
+private final class DeviceLocationFetcher: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var continuation: CheckedContinuation<CLLocation, Error>?
+    private var awaitingAuthorization = false
+
+    enum LocationError: LocalizedError {
+        case denied
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .denied:
+                return "Location access is off. Enable it in System Settings → Privacy & Security → Location Services."
+            case .failed(let message):
+                return message
+            }
+        }
+    }
+
+    override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    /// Resolve the current location, requesting permission on first use. Only one
+    /// request may be in flight; a second call fails the earlier one.
+    func currentLocation() async throws -> CLLocation {
+        return try await withCheckedThrowingContinuation { continuation in
+            if let pending = self.continuation {
+                pending.resume(throwing: LocationError.failed("Location request superseded."))
+            }
+            self.continuation = continuation
+
+            switch manager.authorizationStatus {
+            case .denied, .restricted:
+                finish(.failure(LocationError.denied))
+            case .notDetermined:
+                awaitingAuthorization = true
+                manager.requestWhenInUseAuthorization()
+            default: // authorized (Always / WhenInUse)
+                manager.requestLocation()
+            }
+        }
+    }
+
+    private func finish(_ result: Result<CLLocation, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        awaitingAuthorization = false
+        continuation.resume(with: result)
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            guard awaitingAuthorization else { return }
+            switch manager.authorizationStatus {
+            case .denied, .restricted:
+                finish(.failure(LocationError.denied))
+            case .notDetermined:
+                break // still waiting on the user
+            default:
+                awaitingAuthorization = false
+                manager.requestLocation()
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        Task { @MainActor in
+            if let location = locations.last {
+                finish(.success(location))
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor in
+            finish(.failure(LocationError.failed(error.localizedDescription)))
+        }
+    }
+}
+
 // MARK: - API decoding
 
 private struct WeatherResponse: Decodable {
@@ -319,6 +436,7 @@ private struct WeatherSettings: View {
     @State private var query = ""
     @State private var results: [GeoPlace] = []
     @State private var isSearching = false
+    @State private var isLocating = false
     @State private var searchError: String?
 
     var body: some View {
@@ -336,6 +454,18 @@ private struct WeatherSettings: View {
                     .font(.body.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    locate()
+                } label: {
+                    Label("Use my location", systemImage: "location")
+                }
+                .disabled(isLocating)
+                if isLocating {
+                    ProgressView().controlSize(.small)
+                }
             }
 
             HStack {
@@ -417,5 +547,21 @@ private struct WeatherSettings: View {
         query = ""
         searchError = nil
         Task { await plugin.selectPlace(place) }
+    }
+
+    private func locate() {
+        guard !isLocating else { return }
+        isLocating = true
+        searchError = nil
+        Task {
+            defer { isLocating = false }
+            await plugin.useDeviceLocation()
+            if let err = plugin.lastError {
+                searchError = err
+            } else {
+                results = []
+                query = ""
+            }
+        }
     }
 }
