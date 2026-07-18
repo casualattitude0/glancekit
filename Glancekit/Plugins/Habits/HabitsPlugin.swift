@@ -387,6 +387,64 @@ private func habitsScheduleText(_ schedule: Habit.Schedule) -> String {
     }
 }
 
+// MARK: - Icon picker
+
+/// Curated SF Symbols for habits, so a user picks one by sight instead of having
+/// to guess a symbol name (which nobody knows off-hand). Grouped loosely by the
+/// kind of habit each suits — fitness, mind, daily-life, wellbeing.
+private let habitsIconChoices: [String] = [
+    // Fitness & movement
+    "figure.run", "figure.walk", "figure.strengthtraining.traditional",
+    "figure.yoga", "dumbbell", "sportscourt", "bicycle", "flame",
+    // Mind & learning
+    "book", "text.book.closed", "graduationcap", "pencil",
+    "brain.head.profile", "newspaper", "music.note", "paintbrush",
+    // Daily life
+    "cup.and.saucer", "fork.knife", "drop", "pills", "leaf",
+    "cart", "creditcard", "house",
+    // Wellbeing & rhythm
+    "heart", "bed.double", "sun.max", "moon.stars",
+    "alarm", "timer", "checkmark.seal", "star",
+]
+
+/// A tappable grid of curated habit icons bound to a symbol name. Selecting one
+/// updates the binding; the current choice is highlighted. If the habit already
+/// carries an icon that isn't in the curated set, it's shown as an extra leading
+/// tile so editing never silently drops it.
+private struct HabitsIconPicker: View {
+    @Binding var icon: String
+
+    private let columns = Array(repeating: GridItem(.fixed(34), spacing: 6), count: 8)
+
+    /// Curated icons, plus the current one first if it isn't already among them.
+    private var choices: [String] {
+        if icon.isEmpty || habitsIconChoices.contains(icon) { return habitsIconChoices }
+        return [icon] + habitsIconChoices
+    }
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(choices, id: \.self) { symbol in
+                let selected = symbol == icon
+                Button {
+                    icon = symbol
+                } label: {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15))
+                        .frame(width: 34, height: 34)
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(selected ? Color.accentColor : Color.primary.opacity(0.07))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(symbol)
+            }
+        }
+    }
+}
+
 // MARK: - Popover UI
 
 private struct HabitsPopover: View {
@@ -695,70 +753,20 @@ private enum HabitsSheetRoute: Identifiable {
 private struct HabitsSettings: View {
     @Bindable var plugin: HabitsPlugin
 
-    @State private var newName: String = ""
-    @State private var newIcon: String = "star"
-    @State private var isDaily: Bool = true
-    @State private var selectedWeekdays: Set<Int> = [2, 3, 4, 5, 6] // Mon–Fri
     @State private var route: HabitsSheetRoute?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Add a habit")
-                .font(.headline)
-
-            TextField("Name (e.g. Read 20 min)", text: $newName)
-                .textFieldStyle(.roundedBorder)
-
             HStack {
-                Image(systemName: newIcon.isEmpty ? "questionmark" : newIcon)
-                    .frame(width: 20)
-                    .foregroundStyle(.secondary)
-                TextField("SF Symbol (e.g. book, dumbbell)", text: $newIcon)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            Picker("Schedule", selection: $isDaily) {
-                Text("Every day").tag(true)
-                Text("Specific weekdays").tag(false)
-            }
-            .pickerStyle(.segmented)
-
-            if !isDaily {
-                HStack(spacing: 4) {
-                    ForEach(habitsWeekdaySymbols, id: \.0) { num, label in
-                        let on = selectedWeekdays.contains(num)
-                        Button(label) {
-                            if on { selectedWeekdays.remove(num) }
-                            else { selectedWeekdays.insert(num) }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(on ? .accentColor : .gray)
-                        .controlSize(.small)
-                    }
+                Text("Your habits")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    route = .add
+                } label: {
+                    Label("Add habit", systemImage: "plus")
                 }
             }
-
-            Button("Add habit") {
-                let name = newName.trimmingCharacters(in: .whitespaces)
-                guard !name.isEmpty else { return }
-                let icon = newIcon.trimmingCharacters(in: .whitespaces)
-                let schedule: Habit.Schedule = isDaily
-                    ? .daily
-                    : .weekdays(selectedWeekdays.isEmpty ? [] : selectedWeekdays)
-                plugin.addHabit(Habit(name: name,
-                                      icon: icon.isEmpty ? "circle" : icon,
-                                      schedule: schedule))
-                newName = ""
-                newIcon = "star"
-                isDaily = true
-                selectedWeekdays = [2, 3, 4, 5, 6]
-            }
-            .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-
-            Divider()
-
-            Text("Your habits")
-                .font(.headline)
 
             if plugin.activeHabits.isEmpty {
                 Text("No habits yet.")
@@ -969,12 +977,11 @@ private struct HabitsEditor: View {
                 TextField("Name (e.g. Read 20 min)", text: $name)
                     .textFieldStyle(.roundedBorder)
 
-                HStack {
-                    Image(systemName: icon.isEmpty ? "questionmark" : icon)
-                        .frame(width: 20)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Icon")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField("SF Symbol (e.g. book, dumbbell)", text: $icon)
-                        .textFieldStyle(.roundedBorder)
+                    HabitsIconPicker(icon: $icon)
                 }
 
                 Picker("Schedule", selection: $isDaily) {
