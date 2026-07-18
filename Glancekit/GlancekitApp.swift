@@ -11,6 +11,9 @@ struct GlancekitApp: App {
 
     init() {
         let registry = PluginRegistry()
+        // Built up front (not at line ~60) because AIPlugin needs it at
+        // registration time to drive its enable/disable tools.
+        let coordinator = RefreshCoordinator(registry: registry)
 
         // ── Plugin registration ───────────────────────────────────────────
         // Registration order is the default popover order for a new install;
@@ -25,6 +28,7 @@ struct GlancekitApp: App {
         registry.register(ColorsPlugin())
         registry.register(WeatherPlugin())
         registry.register(NotesPlugin())
+        registry.register(AIPlugin(registry: registry, coordinator: coordinator))
         // ──────────────────────────────────────────────────────────────────
 
         // Seed after registration so the ring knows every glance that exists.
@@ -57,7 +61,7 @@ struct GlancekitApp: App {
         // ──────────────────────────────────────────────────────────────────
 
         _registry = State(initialValue: registry)
-        _coordinator = State(initialValue: RefreshCoordinator(registry: registry))
+        _coordinator = State(initialValue: coordinator)
         _hotkeys = State(initialValue: hotkeys)
         _quickSwitch = State(initialValue: quickSwitch)
         _tutorial = State(initialValue: TutorialController(registry: registry))
