@@ -47,10 +47,12 @@ else
 fi
 
 # Pick the app zip (…-<version>.zip), not the .dmg — a zip needs no mount.
+# The `|| true` keeps a no-match grep (under `set -o pipefail`) from aborting the
+# script here, so the explicit empty checks below report the friendly error.
 ZIP_URL="$(printf '%s' "$META" \
   | grep -oE '"browser_download_url":[[:space:]]*"[^"]+\.zip"' \
-  | sed -E 's/.*"(https[^"]+)"/\1/' | head -n1)"
-TAG="$(printf '%s' "$META" | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)"$/\1/')"
+  | sed -E 's/.*"(https[^"]+)"/\1/' | head -n1 || true)"
+TAG="$(printf '%s' "$META" | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)"$/\1/' || true)"
 
 if [ -z "$ZIP_URL" ]; then
   echo "✗ Could not find a .zip asset on the $VERSION release." >&2
