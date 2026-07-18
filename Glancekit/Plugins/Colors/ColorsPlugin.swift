@@ -153,6 +153,12 @@ final class ColorsPlugin: GlancePlugin {
         // Nothing to auto-refresh; the tool is entirely user-driven.
     }
 
+    /// A real editing surface (the picker beside a list of color sets) earns a
+    /// roomier standalone window than the default 360×520 — wide enough for the
+    /// palette sidebar to sit LEFT of the picker. In the narrow menu-bar popover
+    /// the same view collapses to a single column (see `ColorsPopover`).
+    var preferredToolWindowSize: CGSize? { CGSize(width: 620, height: 560) }
+
     func popoverSection() -> AnyView {
         AnyView(ColorsPopover(plugin: self))
     }
@@ -247,109 +253,475 @@ final class ColorsPlugin: GlancePlugin {
 
 // MARK: - Popover UI
 
+// The same section renders in two very different containers: a narrow column in
+// the menu-bar popover, and a wide standalone tool window (see
+// `preferredToolWindowSize`). So it has two shapes, chosen by `ViewThatFits`:
+//
+//   • Two-pane — the color-set list (Favorites + user palettes) as a sidebar on
+//     the LEFT beside the picker, when there's room (the standalone window).
+//   • Single column — the picker on top with a compact set-picker menu, in the
+//     narrow menu.
+//
+// `ViewThatFits` takes the widest layout that fits its container, so the section
+// can never overflow the menu popover into a neighbouring glance.
 private struct ColorsPopover: View {
     @Bindable var plugin: ColorsPlugin
-    private let store = ColorFavoritesStore.shared
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 6)
+    private let favorites = ColorFavoritesStore.shared
+    private let palettes = ColorPaletteStore.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                plugin.pickColor()
-            } label: {
-                Label("Pick color", systemImage: "eyedropper")
-                    .frame(maxWidth: .infinity)
-            }
+        ViewThatFits(in: .horizontal) {
+            twoPane
+            singleColumn
+        }
+    }
 
-            if let err = plugin.lastError {
-                Label(err, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
+    // MARK: Layouts
 
-            // Current color + hex + actions.
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(plugin.selectedColor)
-                    .frame(width: 44, height: 44)
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
-
-                // The hex code is the whole point of the tool — never let it
-                // truncate, even in the narrow popover. Everything else gives
-                // way to it first.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(plugin.selectedHex)
-                        .font(.body.monospaced().weight(.semibold))
-                        .textSelection(.enabled)
-                        .fixedSize()
-                    Text("R \(Int(plugin.red))  G \(Int(plugin.green))  B \(Int(plugin.blue))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                }
-                .layoutPriority(1)
-
-                Spacer(minLength: 4)
-
-                Button {
-                    plugin.toggleFavorite()
-                } label: {
-                    Image(systemName: store.isFavorite(plugin.selectedHex) ? "star.fill" : "star")
-                        .foregroundStyle(store.isFavorite(plugin.selectedHex) ? Color.yellow : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(store.isFavorite(plugin.selectedHex) ? "Remove from favorites" : "Add to favorites")
-
-                Button("Copy") { plugin.copySelected() }
-                    .fixedSize()
-            }
-
-            // Saturation × brightness field + hue slider.
-            VStack(spacing: 8) {
-                SaturationBrightnessField(
-                    hue: plugin.hue,
-                    saturation: $plugin.saturation,
-                    brightness: $plugin.brightness
-                )
-                .frame(height: 130)
-
-                HueSlider(hue: $plugin.hue)
-                    .frame(height: 18)
-            }
-
-            if !plugin.recentHexes.isEmpty {
-                Divider()
-                Text("Recent")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: columns, spacing: 6) {
-                    ForEach(plugin.recentHexes, id: \.self) { hex in
-                        ColorSwatch(hex: hex) { plugin.selectSwatch(hex) }
-                    }
-                }
-            }
+    private var twoPane: some View {
+        HStack(alignment: .top, spacing: 14) {
+            PaletteSidebar(plugin: plugin)
+                .frame(width: 168)
 
             Divider()
-            Text("Favorites")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
 
-            if store.favorites.isEmpty {
-                Text("No favorites yet.")
-                    .font(.caption)
+            VStack(alignment: .leading, spacing: 10) {
+                picker
+                Divider()
+                selectedSetSection
+                if !plugin.recentHexes.isEmpty {
+                    Divider()
+                    recentSection
+                }
+            }
+            .frame(minWidth: 300)
+        }
+    }
+
+    private var singleColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            picker
+            Divider()
+            // No room for a sidebar here — the set is chosen from a menu instead.
+            HStack {
+                Text("Set")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: columns, spacing: 6) {
-                    ForEach(store.favorites, id: \.self) { hex in
-                        ColorSwatch(hex: hex) { plugin.select(hex: hex) }
-                            .contextMenu {
-                                Button("Remove", role: .destructive) { store.remove(hex) }
-                            }
+                Spacer()
+                PaletteMenu(plugin: plugin)
+            }
+            selectedSetSection
+            if !plugin.recentHexes.isEmpty {
+                Divider()
+                recentSection
+            }
+        }
+    }
+
+    // MARK: Picker (shared by both layouts)
+
+    @ViewBuilder
+    private var picker: some View {
+        Button {
+            plugin.pickColor()
+        } label: {
+            Label("Pick color", systemImage: "eyedropper")
+                .frame(maxWidth: .infinity)
+        }
+
+        if let err = plugin.lastError {
+            Label(err, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+
+        // Current color + hex + actions.
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(plugin.selectedColor)
+                .frame(width: 44, height: 44)
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+
+            // The hex code is the whole point of the tool — never let it
+            // truncate, even in the narrow popover. Everything else gives
+            // way to it first.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(plugin.selectedHex)
+                    .font(.body.monospaced().weight(.semibold))
+                    .textSelection(.enabled)
+                    .fixedSize()
+                Text("R \(Int(plugin.red))  G \(Int(plugin.green))  B \(Int(plugin.blue))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 4)
+
+            Button {
+                plugin.toggleFavorite()
+            } label: {
+                Image(systemName: favorites.isFavorite(plugin.selectedHex) ? "star.fill" : "star")
+                    .foregroundStyle(favorites.isFavorite(plugin.selectedHex) ? Color.yellow : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(favorites.isFavorite(plugin.selectedHex) ? "Remove from favorites" : "Add to favorites")
+
+            Button("Copy") { plugin.copySelected() }
+                .fixedSize()
+        }
+
+        // Saturation × brightness field + hue slider.
+        VStack(spacing: 8) {
+            SaturationBrightnessField(
+                hue: plugin.hue,
+                saturation: $plugin.saturation,
+                brightness: $plugin.brightness
+            )
+            .frame(height: 130)
+
+            HueSlider(hue: $plugin.hue)
+                .frame(height: 18)
+        }
+    }
+
+    // MARK: Selected set (favorites or the chosen palette)
+
+    /// Adaptive columns fill the panel width evenly and re-flow with it, so the
+    /// grid never leaves a ragged gap on the right the way fixed columns did.
+    private let swatchColumns = [GridItem(.adaptive(minimum: 30, maximum: 46), spacing: 6)]
+
+    private func isCurrent(_ hex: String) -> Bool {
+        hex.caseInsensitiveCompare(plugin.selectedHex) == .orderedSame
+    }
+
+    @ViewBuilder
+    private var selectedSetSection: some View {
+        switch palettes.selection {
+        case .favorites:
+            setHeader(title: "Favorites",
+                      count: favorites.favorites.count,
+                      canAdd: !favorites.isFavorite(plugin.selectedHex)) {
+                favorites.add(plugin.selectedHex)
+            }
+            swatchGrid(favorites.favorites,
+                       emptyText: "Star a color, or use Add, to keep it here.") { hex in
+                favorites.remove(hex)
+            }
+
+        case .palette(let id):
+            let palette = palettes.palette(id)
+            setHeader(title: palette?.name ?? "Palette",
+                      count: palette?.colors.count ?? 0,
+                      canAdd: !(palette.map { palettes.contains(plugin.selectedHex, in: $0.id) } ?? true)) {
+                palettes.addColor(plugin.selectedHex, to: id)
+            }
+            swatchGrid(palette?.colors ?? [],
+                       emptyText: "Add the current color with the Add button.") { hex in
+                palettes.removeColor(hex, from: id)
+            }
+        }
+    }
+
+    /// A set title (with count) and an "add current color" button on the right,
+    /// tinted to the live color so it reads as "put *this* in the set".
+    private func setHeader(title: String, count: Int, canAdd: Bool,
+                           add: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            sectionLabel(title, count: count)
+            Spacer()
+            Button(action: add) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(plugin.selectedColor)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().strokeBorder(.quaternary))
+                    Text("Add")
+                }
+                .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canAdd)
+            .help(canAdd ? "Add the current color to this set" : "Already in this set")
+        }
+    }
+
+    /// A grid of swatches with tap-to-select and context-menu remove, or a
+    /// placeholder line when empty. The live color gets an accent ring so it's
+    /// easy to spot which swatch is currently loaded.
+    @ViewBuilder
+    private func swatchGrid(_ hexes: [String], emptyText: String,
+                            remove: @escaping (String) -> Void) -> some View {
+        if hexes.isEmpty {
+            Text(emptyText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+        } else {
+            LazyVGrid(columns: swatchColumns, spacing: 6) {
+                ForEach(hexes, id: \.self) { hex in
+                    ColorSwatch(hex: hex, isSelected: isCurrent(hex), fillWidth: true) {
+                        plugin.select(hex: hex)
+                    }
+                    .contextMenu {
+                        Button("Copy") { plugin.selectSwatch(hex) }
+                        Button("Remove", role: .destructive) { remove(hex) }
                     }
                 }
             }
         }
+    }
+
+    // MARK: Recent
+
+    // Recents are time-ordered, so a single horizontal strip (newest at the
+    // left) reads as a timeline — a wrapping grid loses that order cue.
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("Recent", count: plugin.recentHexes.count)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(plugin.recentHexes, id: \.self) { hex in
+                        ColorSwatch(hex: hex, isSelected: isCurrent(hex)) {
+                            plugin.selectSwatch(hex)
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    /// A section title with a subtle count chip.
+    private func sectionLabel(_ title: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(count)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+// MARK: - Palette sidebar (wide layout)
+
+/// The left-hand list of color sets: Favorites (built-in, always first) followed
+/// by the user's palettes, with add/remove/rename controls at the foot.
+private struct PaletteSidebar: View {
+    @Bindable var plugin: ColorsPlugin
+    private let favorites = ColorFavoritesStore.shared
+    private let palettes = ColorPaletteStore.shared
+
+    /// The palette whose name field is currently open for editing, if any, and
+    /// the working copy of its name. A draft (rather than binding straight to
+    /// the store) lets Escape/empty-input fall back to the existing name.
+    @State private var renamingID: UUID?
+    @State private var draftName = ""
+    @FocusState private var nameFieldFocused: Bool
+
+    /// The palette awaiting a delete confirmation, if any. Deleting a set throws
+    /// away every color in it, so both delete paths route through a prompt.
+    @State private var pendingDeleteID: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Sets")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(spacing: 2) {
+                    row(title: "Favorites",
+                        systemImage: "star.fill",
+                        count: favorites.favorites.count,
+                        isSelected: palettes.selection == .favorites) {
+                        palettes.selection = .favorites
+                    }
+
+                    ForEach(palettes.palettes) { palette in
+                        paletteRow(palette)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 6) {
+                // New set: create, select, and drop straight into an
+                // auto-focused rename with the default name preselected — type
+                // and it's replaced, or click away / press ⏎ to keep it. No
+                // mandatory field-click first.
+                Button(action: addAndRename) {
+                    Label("New set", systemImage: "plus")
+                        .font(.caption)
+                }
+                .help("New color set")
+
+                Spacer()
+
+                Button {
+                    if case .palette(let id) = palettes.selection {
+                        pendingDeleteID = id
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(palettes.selection == .favorites)
+                .help("Delete the selected set")
+            }
+            .buttonStyle(.borderless)
+        }
+        .confirmationDialog(
+            deletePrompt,
+            isPresented: Binding(
+                get: { pendingDeleteID != nil },
+                set: { if !$0 { pendingDeleteID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = pendingDeleteID { palettes.removePalette(id) }
+                pendingDeleteID = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteID = nil }
+        }
+        // The dialog is a separate panel: presenting it takes key away from the
+        // floating tool window, which would auto-close it (same problem the
+        // eyedropper has). Suspend click-outside dismissal while it's up — same
+        // bracket ColorsPlugin.pickColor() uses — so the window survives long
+        // enough for the button action to run, then re-focus it on dismiss.
+        .onChange(of: pendingDeleteID) { _, id in
+            if id != nil {
+                ToolWindowManager.shared.suspendAutoClose()
+            } else {
+                ToolWindowManager.shared.resumeAutoClose()
+            }
+        }
+    }
+
+    /// Names the set in the confirmation so it's clear which one is going.
+    private var deletePrompt: String {
+        guard let id = pendingDeleteID, let palette = palettes.palette(id) else {
+            return "Delete this set?"
+        }
+        let n = palette.colors.count
+        let colors = n == 1 ? "1 color" : "\(n) colors"
+        return "Delete “\(palette.name)”? Its \(colors) will be removed."
+    }
+
+    @ViewBuilder
+    private func paletteRow(_ palette: ColorPalette) -> some View {
+        if renamingID == palette.id {
+            // Placeholder shows the current name, so an empty draft still reads
+            // sensibly and committing empty keeps that name (see commitRename).
+            TextField(palette.name, text: $draftName)
+                .textFieldStyle(.roundedBorder)
+                .font(.callout)
+                .focused($nameFieldFocused)
+                .onSubmit(commitRename)
+                .onExitCommand { renamingID = nil }        // Escape: cancel
+                .onChange(of: nameFieldFocused) { _, focused in
+                    // Clicking anywhere else commits, matching Finder's New Folder.
+                    if !focused && renamingID == palette.id { commitRename() }
+                }
+        } else {
+            row(title: palette.name,
+                systemImage: "paintpalette",
+                count: palette.colors.count,
+                isSelected: palettes.selection == .palette(palette.id)) {
+                palettes.selection = .palette(palette.id)
+            }
+            .contextMenu {
+                Button("Rename") { beginRename(palette) }
+                Button("Delete", role: .destructive) { pendingDeleteID = palette.id }
+            }
+        }
+    }
+
+    private func addAndRename() {
+        let id = palettes.addPalette()
+        draftName = ""
+        renamingID = id
+        nameFieldFocused = true
+    }
+
+    private func beginRename(_ palette: ColorPalette) {
+        draftName = palette.name
+        renamingID = palette.id
+        nameFieldFocused = true
+    }
+
+    private func commitRename() {
+        defer { renamingID = nil }
+        guard let id = renamingID else { return }
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty means "leave it": a fresh set keeps its "Palette N" default.
+        if !trimmed.isEmpty { palettes.rename(id, to: trimmed) }
+    }
+
+    private func row(title: String, systemImage: String, count: Int,
+                     isSelected: Bool, select: @escaping () -> Void) -> some View {
+        Button(action: select) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? Color.white : .secondary)
+                    .frame(width: 14)
+                Text(title)
+                    .font(.callout)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.8) : .secondary)
+            }
+            .foregroundStyle(isSelected ? Color.white : .primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Palette menu (narrow layout)
+
+/// The set chooser for the single-column popover, where there's no room for the
+/// sidebar. Picking "New set…" both creates and selects one.
+private struct PaletteMenu: View {
+    @Bindable var plugin: ColorsPlugin
+    private let palettes = ColorPaletteStore.shared
+
+    private var currentTitle: String {
+        switch palettes.selection {
+        case .favorites: return "Favorites"
+        case .palette(let id): return palettes.palette(id)?.name ?? "Palette"
+        }
+    }
+
+    var body: some View {
+        Menu(currentTitle) {
+            Button("Favorites") { palettes.selection = .favorites }
+            if !palettes.palettes.isEmpty {
+                Divider()
+                ForEach(palettes.palettes) { palette in
+                    Button(palette.name) { palettes.selection = .palette(palette.id) }
+                }
+            }
+            Divider()
+            Button("New set…") { palettes.addPalette() }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 }
 
@@ -440,14 +812,27 @@ private struct HueSlider: View {
 
 private struct ColorSwatch: View {
     let hex: String
+    /// Draws an accent ring — used to mark the swatch matching the live color.
+    var isSelected: Bool = false
+    /// Fill the enclosing grid cell's width (fixed square otherwise).
+    var fillWidth: Bool = false
+    var height: CGFloat = 28
     let action: () -> Void
+
+    private let cornerRadius: CGFloat = 6
 
     var body: some View {
         Button(action: action) {
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: cornerRadius)
                 .fill(swatchColor)
-                .frame(width: 26, height: 26)
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary))
+                .frame(width: fillWidth ? nil : height, height: height)
+                .frame(maxWidth: fillWidth ? .infinity : nil)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .strokeBorder(
+                            isSelected ? Color.accentColor : Color.black.opacity(0.12),
+                            lineWidth: isSelected ? 2 : 1)
+                )
         }
         .buttonStyle(.plain)
         .help(hex)
