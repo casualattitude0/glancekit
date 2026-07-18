@@ -18,9 +18,11 @@ struct QuickSwitchSettingsView: View {
 
             // Split the same way the Glances page is, so the rows the shortcut
             // actually steps through read as a ring on their own rather than
-            // having to be picked out of a mixed list. A grayed-out row sorts
-            // below with the excluded ones — its switch reads off, so grouping
-            // it as included would contradict the switch beside it.
+            // having to be picked out of a mixed list. The glances that are off
+            // over on the Glances page get a section of their own, with no
+            // switch: a glance that's off can't cycle, so a toggle there would
+            // be a dead control — they're listed only so you can see why they're
+            // missing and know to re-enable them on the Glances page.
             List {
                 if !includedRows.isEmpty {
                     Section("Included") {
@@ -39,6 +41,12 @@ struct QuickSwitchSettingsView: View {
                             }
                     }
                 }
+
+                if !disabledRows.isEmpty {
+                    Section("Off in Glances") {
+                        ForEach(disabledRows, id: \.id, content: disabledRowBody)
+                    }
+                }
             }
             .frame(minHeight: 260)
 
@@ -55,38 +63,35 @@ struct QuickSwitchSettingsView: View {
         }
     }
 
+    /// A row in the Included / Not included sections: draggable, with a switch
+    /// that adds or removes the glance from the ring. Only enabled glances land
+    /// here — the disabled ones live in their own section (`disabledRowBody`).
     private func rowBody(_ row: Row) -> some View {
         HStack {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
             Label(row.title, systemImage: row.icon)
-                // Dim the label alone so an off-in-Glances row still reads as
-                // off, without the greyed-out-and-inert look that `.disabled`
-                // gave the switch — see the toggle below.
-                .foregroundStyle(row.isEnabled ? .primary : .secondary)
-            if !row.isEnabled {
-                Text("Off in Glances")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
             Spacer()
             Toggle("", isOn: Binding(
-                // Off-in-Glances rows keep a live switch instead of a dead,
-                // greyed-out one: turning it on switches the glance back on over
-                // on the Glances page too, so the ring actually gains it. A
-                // glance that's off can't cycle, so an include toggle that left
-                // it off would be a control that visibly does nothing.
                 get: { row.isIncluded },
-                set: { included in
-                    if included && !row.isEnabled {
-                        registry.setEnabled(row.id, true)
-                    }
-                    quickSwitch.setIncluded(row.id, included)
-                }
+                set: { quickSwitch.setIncluded(row.id, $0) }
             ))
             .labelsHidden()
             .toggleStyle(.switch)
         }
+    }
+
+    /// A row in the "Off in Glances" section: no drag handle and no switch,
+    /// since a glance that's off can't be in the ring. It's dimmed and shown
+    /// only so the glance's absence from the ring is explained.
+    private func disabledRowBody(_ row: Row) -> some View {
+        HStack {
+            Label(row.title, systemImage: row.icon)
+            Spacer()
+            Text("Turn on in Glances to use")
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
     }
 
     private func move(_ group: [Row], _ offsets: IndexSet, _ destination: Int) {
@@ -101,7 +106,7 @@ struct QuickSwitchSettingsView: View {
     private var intro: String {
         let key = hotkeys.shortcut(for: .quickSwitch)?.displayString
         let press = key.map { "Press \($0)" } ?? "The Quick Switch shortcut"
-        return "\(press) to open the next glance below; press again to keep going, and it wraps around to the top. Drag to set the order. A glance you've turned off on the Glances page is dimmed and marked “Off in Glances” — switch it on here and it turns back on there too, so it can join the ring."
+        return "\(press) to open the next glance below; press again to keep going, and it wraps around to the top. Drag to set the order. Glances you've turned off on the Glances page are listed under “Off in Glances” — turn one back on there to make it available here."
     }
 
     /// Every glance in ring order, whether it's in the ring or not — the page
@@ -123,7 +128,14 @@ struct QuickSwitchSettingsView: View {
     }
 
     private var includedRows: [Row] { rows.filter(\.isIncluded) }
-    private var excludedRows: [Row] { rows.filter { !$0.isIncluded } }
+
+    /// Enabled glances that aren't in the ring — the ones a switch can add.
+    /// Disabled glances are pulled out into `disabledRows` so they don't sit
+    /// beside a switch they can't meaningfully use.
+    private var excludedRows: [Row] { rows.filter { $0.isEnabled && !$0.isIncluded } }
+
+    /// Glances turned off on the Glances page: shown for context, no switch.
+    private var disabledRows: [Row] { rows.filter { !$0.isEnabled } }
 
     private var ringCount: Int { quickSwitch.ring(in: registry).count }
 
