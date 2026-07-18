@@ -36,6 +36,12 @@ protocol GlancePlugin: AnyObject {
     /// shows a grant prompt for these instead of `popoverSection()`. Default: none.
     var requiredPermissions: [GlancePermission] { get }
 
+    /// This glance's current relevance for the Smart Panel — the dynamic
+    /// menu-bar layout that surfaces only the glances that need attention.
+    /// Compute it from the state already held after `refresh()`. Return `nil`
+    /// (the default) when there's nothing worth surfacing right now.
+    func currentSignal() -> GlanceSignal?
+
     /// Rich content shown inside the popover window.
     func popoverSection() -> AnyView
 
@@ -55,6 +61,7 @@ protocol GlancePlugin: AnyObject {
 }
 
 extension GlancePlugin {
+    func currentSignal() -> GlanceSignal? { nil }
     func settingsSection() -> AnyView { AnyView(EmptyView()) }
     var refreshInterval: TimeInterval { 0 }
     var requiredPermissions: [GlancePermission] { [] }
