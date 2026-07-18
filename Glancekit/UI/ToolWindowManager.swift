@@ -38,6 +38,20 @@ final class ToolWindowManager {
     private var delegates: [String: ToolWindowDelegate] = [:]
     private var lastShownPluginID: String?
 
+    /// Selection state for the unified Quick Switch window, shared between its nav
+    /// bar and the shortcut. Long-lived so closing the window doesn't forget which
+    /// tool was on screen — reopening resumes it.
+    let quickSwitchModel = QuickSwitchModel()
+
+    /// The unified Quick Switch window is stored in `windows` under this reserved
+    /// key — not a real plugin id — so the auto-close, resign-key, and eyedropper
+    /// suspend/resume paths, all keyed by id, treat it like any other tool window.
+    private static let quickSwitchWindowID = "__glancekit.quickswitch__"
+
+    /// One size for every tool in the Quick Switch window — the whole point of the
+    /// unified window is that switching never resizes it. Content scrolls to fit.
+    private static let quickSwitchWindowSize = CGSize(width: 440, height: 600)
+
     /// Nesting depth of `suspendAutoClose()` calls. A count rather than a flag
     /// so overlapping suspensions (two windows sampling in sequence) can't have
     /// the first one to finish re-arm auto-close under the other.
@@ -61,49 +75,45 @@ final class ToolWindowManager {
         show(plugin: plugin)
     }
 
-    /// Shows the glance after the visible one in `plugins`, wrapping at the end.
-    /// With no tool window up, opens the first. This is what the Quick Switch
-    /// shortcut calls: each press advances one step around the ring.
+    /// Opens the unified Quick Switch window, or steps it to the next tool if it's
+    /// already up. This is what the Quick Switch shortcut calls: one window with a
+    /// nav bar of every glance in `plugins`, its body swapped in place rather than
+    /// a fresh window per glance.
     ///
-    /// The window being stepped away from is closed rather than left behind, so
-    /// a lap around the ring doesn't litter the screen with every glance in it.
+    /// With the window already up, a press advances one tool around the ring —
+    /// exactly what a nav-bar click does, so the shortcut and the bar stay in
+    /// step. With it down, it reopens on the tool last shown (the model keeps the
+    /// selection across closes), falling back to the first when that glance has
+    /// dropped out of the ring.
     func quickSwitch(among plugins: [any GlancePlugin]) {
         guard !plugins.isEmpty else { return }
-        // Same reasoning as `toggle`: an eyedrop in progress owns the screen,
-        // and swapping windows underneath it would discard the pick.
+        // Same reasoning as `toggle`: an eyedrop in progress owns the screen, and
+        // swapping the window's body underneath it would discard the pick.
         guard !isAutoCloseSuspended else { return }
 
-        guard let current = visiblePluginID,
-              let index = plugins.firstIndex(where: { $0.id == current })
-        else {
-            // Nothing up, or what's up isn't in the ring: resume where the ring
-            // last left off. `lastShownPluginID` still holds the glance whose
-            // window was closed most recently, so reopening it picks the ring
-            // back up where the user left it rather than snapping to the top.
-            // Falls back to the top when that glance has since dropped out of
-            // the ring (disabled or excluded), or on a first-ever switch.
-            //
-            // A window that is up but out of the ring still has to be closed
-            // here — it is floating, and once it resigns key to the window we
-            // are about to show it will never fire `windowDidResignKey` again,
-            // so nothing else would ever take it off the screen.
-            if let current = visiblePluginID { close(pluginID: current) }
-            let resume = lastShownPluginID.flatMap { id in
-                plugins.first { $0.id == id }
-            }
-            show(plugin: resume ?? plugins[0])
+        quickSwitchModel.setRing(plugins)
+
+        if let window = windows[Self.quickSwitchWindowID], window.isVisible {
+            quickSwitchModel.advance()
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
             return
         }
 
-        close(pluginID: current)
-        show(plugin: plugins[(index + 1) % plugins.count])
+        showQuickSwitchWindow()
     }
 
-    /// The glance whose tool window is currently on screen, if any. Only the
-    /// most recently shown one counts — the others were closed on the way here.
-    private var visiblePluginID: String? {
-        guard let id = lastShownPluginID, windows[id]?.isVisible == true else { return nil }
-        return id
+    /// Brings the unified Quick Switch window to front at the mouse, creating it
+    /// on first use. The selection is already set on `quickSwitchModel`.
+    private func showQuickSwitchWindow() {
+        let id = Self.quickSwitchWindowID
+        let window = windows[id] ?? makeQuickSwitchWindow()
+        windows[id] = window
+        lastShownPluginID = id
+
+        window.setFrameOrigin(originNearMouse(for: window.frame.size))
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     /// Brings the given glance's tool window to front at the current mouse
@@ -171,6 +181,40 @@ final class ToolWindowManager {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    private func makeQuickSwitchWindow() -> NSWindow {
+        let id = Self.quickSwitchWindowID
+        let size = Self.quickSwitchWindowSize
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
+            // No `.resizable`: the window keeps one size across every tool.
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Quick Switch"
+        window.titlebarAppearsTransparent = true
+        // Same reason as the per-glance window: a color glance's drag fields must
+        // win over background dragging. The titlebar remains the way to drag.
+        window.isMovableByWindowBackground = false
+        window.level = .floating
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(
+            rootView: QuickSwitchWindowContent(model: quickSwitchModel) { [weak self] in
+                self?.close(pluginID: id)
+            }
+        )
+
+        let delegate = ToolWindowDelegate { [weak self] in
+            self?.handleResignKey(pluginID: id)
+        }
+        window.delegate = delegate
+        delegates[id] = delegate
+
+        return window
     }
 
     private func makeWindow(for plugin: any GlancePlugin) -> NSWindow {
