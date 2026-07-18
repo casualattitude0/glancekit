@@ -60,27 +60,33 @@ struct QuickSwitchSettingsView: View {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
             Label(row.title, systemImage: row.icon)
+                // Dim the label alone so an off-in-Glances row still reads as
+                // off, without the greyed-out-and-inert look that `.disabled`
+                // gave the switch — see the toggle below.
+                .foregroundStyle(row.isEnabled ? .primary : .secondary)
             if !row.isEnabled {
                 Text("Off in Glances")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             Toggle("", isOn: Binding(
-                // A glance that's off can't be in the ring, so the switch reads
-                // off however the row is stored. The stored value is left alone
-                // rather than cleared: re-enable the glance on the Glances page
-                // and the ring it was part of comes back intact.
+                // Off-in-Glances rows keep a live switch instead of a dead,
+                // greyed-out one: turning it on switches the glance back on over
+                // on the Glances page too, so the ring actually gains it. A
+                // glance that's off can't cycle, so an include toggle that left
+                // it off would be a control that visibly does nothing.
                 get: { row.isIncluded },
-                set: { quickSwitch.setIncluded(row.id, $0) }
+                set: { included in
+                    if included && !row.isEnabled {
+                        registry.setEnabled(row.id, true)
+                    }
+                    quickSwitch.setIncluded(row.id, included)
+                }
             ))
             .labelsHidden()
             .toggleStyle(.switch)
         }
-        // Grays the whole row and blocks the switch; `moveDisabled` covers what
-        // `disabled` doesn't reach — a List row stays draggable otherwise, and a
-        // row you can't switch but can drag is a strange half-inert thing.
-        .disabled(!row.isEnabled)
-        .moveDisabled(!row.isEnabled)
     }
 
     private func move(_ group: [Row], _ offsets: IndexSet, _ destination: Int) {
@@ -95,7 +101,7 @@ struct QuickSwitchSettingsView: View {
     private var intro: String {
         let key = hotkeys.shortcut(for: .quickSwitch)?.displayString
         let press = key.map { "Press \($0)" } ?? "The Quick Switch shortcut"
-        return "\(press) to open the next glance below; press again to keep going, and it wraps around to the top. Drag to set the order. A glance you've turned off on the Glances page is grayed out here and can't take part — turn it back on there to use it."
+        return "\(press) to open the next glance below; press again to keep going, and it wraps around to the top. Drag to set the order. A glance you've turned off on the Glances page is dimmed and marked “Off in Glances” — switch it on here and it turns back on there too, so it can join the ring."
     }
 
     /// Every glance in ring order, whether it's in the ring or not — the page
