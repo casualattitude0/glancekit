@@ -78,6 +78,11 @@ struct Note: Identifiable, Codable, Equatable {
 @Observable
 final class NotesStore {
 
+    /// The app-wide notes store. Shared so every surface — the Notes glance and
+    /// the AI assistant's `create_note` tool — reads and writes the same list,
+    /// the way `ColorPaletteStore.shared` is shared across the Colors surfaces.
+    static let shared = NotesStore()
+
     /// Saved notes, most recently touched first.
     private(set) var notes: [Note] = []
 
@@ -150,6 +155,22 @@ final class NotesStore {
         draft = ""
         editingID = nil
         persistNotes()
+    }
+
+    /// Files a new note straight from given text, without touching the draft.
+    ///
+    /// Unlike `save()` (which banks the in-progress draft), this is for callers
+    /// that hand over finished text — e.g. the AI assistant creating a note on
+    /// the user's behalf. Whitespace-only text is ignored, and the created note
+    /// (or `nil`) is returned so the caller can report what it made.
+    @discardableResult
+    func add(text: String) -> Note? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let note = Note(text: trimmed)
+        notes.insert(note, at: 0)
+        persistNotes()
+        return note
     }
 
     /// Loads a saved note back into the field for editing.

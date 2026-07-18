@@ -13,7 +13,7 @@ final class NotesPlugin: GlancePlugin {
     nonisolated var title: String { "Notes" }
     nonisolated var iconSystemName: String { "note.text" }
 
-    let store = NotesStore()
+    let store = NotesStore.shared
 
     func refresh() async {}
 
