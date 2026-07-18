@@ -130,7 +130,10 @@ final class UpdateChecker {
             throw NetworkClient.NetworkError.decoding("Unexpected releases payload")
         }
 
-        // Prefer a .dmg, then a .zip, from the release's uploaded assets.
+        // Prefer a .zip (installable in place), then a .dmg, from the release's
+        // uploaded assets. HTTPS-only: this download is the trust boundary for an
+        // ad-hoc-signed app the updater will unpack and run, so a non-https asset
+        // URL is rejected rather than fetched over a channel we can't authenticate.
         var assetURL: URL?
         var assetName: String?
         if let assets = json["assets"] as? [[String: Any]] {
@@ -139,7 +142,8 @@ final class UpdateChecker {
                 guard let name = asset["name"] as? String,
                       Self.isDownloadable(name),
                       let urlString = asset["browser_download_url"] as? String,
-                      let url = URL(string: urlString)
+                      let url = URL(string: urlString),
+                      url.scheme?.lowercased() == "https"
                 else { continue }
                 assetURL = url
                 assetName = name
@@ -232,6 +236,9 @@ final class UpdateChecker {
             // `ditto -x -k` mirrors the `ditto -c -k` that built the release zip,
             // merging its AppleDouble metadata instead of scattering ._ files.
             try await Self.runProcess("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
+            // The archive is unpacked; the zip itself is dead weight now. (On the
+            // failure path below the catch removes it too.)
+            try? FileManager.default.removeItem(at: zip)
 
             guard let newApp = Self.locateApp(in: work) else {
                 throw NetworkClient.NetworkError.decoding("Update archive had no .app bundle")
@@ -263,10 +270,16 @@ final class UpdateChecker {
         return nil
     }
 
-    /// Refuse to install anything that isn't the same app, a genuinely newer
-    /// version, and validly signed. The download is HTTPS from GitHub, but a
-    /// signature check is cheap insurance against a corrupted or swapped payload
-    /// before we hand it to a helper that will overwrite the running app.
+    /// Refuse to install anything that isn't the same app bundle id, at least the
+    /// version the release advertised, with an intact code signature.
+    ///
+    /// On trust: the app is ad-hoc signed (no Developer ID, no Team ID), so there
+    /// is no stable signer identity to pin a Designated Requirement against. The
+    /// real integrity boundary is the HTTPS fetch from GitHub (enforced by the
+    /// `https` scheme guard on the asset URL). `codesign -v --strict` here is an
+    /// integrity check — it catches a bundle that arrived corrupted or truncated
+    /// through download and unpack — not attacker authentication, which ad-hoc
+    /// signing cannot provide.
     nonisolated private static func validate(_ app: URL, expectedVersion: String) async throws {
         guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
             throw NetworkClient.NetworkError.decoding("Update bundle has no Info.plist")
@@ -300,23 +313,36 @@ final class UpdateChecker {
         let script = """
         #!/bin/bash
         set -u
+        # A launchd-spawned GUI child can inherit a minimal or empty PATH, so pin
+        # one that resolves the bare tool names used below (lsregister stays a full
+        # path — it does not live on PATH).
+        export PATH=/usr/bin:/bin:/usr/sbin:/sbin
         pid="$1"; new="$2"; dst="$3"; work="$4"
         # Wait (up to ~15s) for the old app to release its executable.
         for _ in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+        # If it is still alive, the old executable is still memory-mapped and
+        # overwriting the bundle now would corrupt the running app. Abort rather
+        # than relaunch a half-clobbered install; the user keeps the old version.
+        if kill -0 "$pid" 2>/dev/null; then rm -rf "$work"; exit 1; fi
         # Swap contents while keeping the bundle directory in place. --checksum
         # compares by content, not size+mtime: two builds of the same file can
         # share both, and rsync's default quick-check would then skip the very
-        # executable we're here to replace.
+        # executable we're here to replace. Plain -a (no -X): macOS's bundled
+        # rsync rejects -X, and the metadata that matters for an app bundle — the
+        # _CodeSignature files — travels as ordinary files; quarantine is cleared
+        # below. This mirrors scripts/install.sh's proven in-place copy.
+        # A failed copy must not fall through to `open`, which would relaunch a
+        # partially written bundle.
         if [ -d "$dst" ]; then
-          rsync -a --delete --checksum "$new/" "$dst/"
+          rsync -a --delete --checksum "$new/" "$dst/" || { rm -rf "$work"; exit 1; }
         else
-          ditto "$new" "$dst"
+          ditto "$new" "$dst" || { rm -rf "$work"; exit 1; }
         fi
         xattr -dr com.apple.quarantine "$dst" 2>/dev/null || true
         "\(lsregister)" -f -R "$dst" 2>/dev/null || true
         killall pkd chronod 2>/dev/null || true
-        rm -rf "$work"
         open "$dst"
+        rm -rf "$work"
         """
         let scriptURL = workDir.appendingPathComponent("swap.sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
