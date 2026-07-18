@@ -1,14 +1,20 @@
 import Foundation
 import AppKit
 
-/// Checks GitHub Releases for a newer build and downloads it on demand.
+/// Checks GitHub Releases for a newer build and installs it in place on demand.
 ///
-/// Backing the "download latest version" button in the popover header. The flow
-/// is: hit the public `releases/latest` endpoint, compare the tag against the
-/// running app's `CFBundleShortVersionString`, and — when newer — download the
-/// first distributable asset (`.dmg`/`.zip`) to ~/Downloads and reveal it in
-/// Finder. If a release carries no binary asset we fall back to opening its
-/// web page so the user can grab it manually.
+/// Backing the "Check for Updates" button. The flow is: hit the public
+/// `releases/latest` endpoint, compare the tag against the running app's
+/// `CFBundleShortVersionString`, and — when newer — download the `.zip` asset,
+/// unpack it, and **replace the running app bundle in place**, then relaunch.
+/// The swap can't run in-process (the executable is memory-mapped and busy while
+/// we're alive), so a small detached helper waits for us to quit, rsyncs the new
+/// bundle over the old one, refreshes the widget daemons, and reopens the app.
+///
+/// Fallbacks, in order: a release that ships only a `.dmg` (or whose install
+/// location isn't writable — e.g. a copy the user can't modify) reverts to the
+/// old behavior of saving the asset to ~/Downloads and revealing it in Finder;
+/// a release with no binary asset opens its web page.
 @MainActor
 @Observable
 final class UpdateChecker {
@@ -23,7 +29,9 @@ final class UpdateChecker {
         /// no fraction can be computed from. `nil` says "indeterminate" so the UI
         /// can show a spinner, rather than a number nobody measured.
         case downloading(progress: Double?)
-        case downloaded(URL)
+        case installing                 // unpacking + swapping the bundle in place
+        case relaunching                // helper launched; the app is about to quit
+        case downloaded(URL)            // fallback: asset saved to ~/Downloads
         case updateAvailable(Release)   // newer release, but no downloadable asset
         case failed(String)
     }
@@ -54,11 +62,13 @@ final class UpdateChecker {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
-    /// Check GitHub for a newer release and, if one exists, download it. Safe to
-    /// call repeatedly; a check already in flight is ignored.
+    /// Check GitHub for a newer release and, if one exists, install it in place.
+    /// Safe to call repeatedly; a check or install already in flight is ignored.
     func checkAndDownload() async {
-        if case .checking = phase { return }
-        if case .downloading = phase { return }
+        switch phase {
+        case .checking, .downloading, .installing, .relaunching: return
+        default: break
+        }
 
         phase = .checking
         do {
@@ -67,18 +77,42 @@ final class UpdateChecker {
                 phase = .upToDate
                 return
             }
-            guard let asset = release.asset else {
+            guard let asset = release.asset, let name = release.assetName else {
                 // Newer version exists but nothing to auto-download — open the page.
                 phase = .updateAvailable(release)
                 NSWorkspace.shared.open(release.htmlURL)
                 return
             }
-            let dest = try await download(asset, suggestedName: release.assetName)
-            phase = .downloaded(dest)
-            NSWorkspace.shared.activateFileViewerSelecting([dest])
+
+            // A `.zip` is an app bundle we can swap in place; a `.dmg` needs
+            // mounting and a manual drag, so it keeps the reveal-in-Finder path.
+            // In-place install also needs a writable bundle location — a copy the
+            // user can't modify (owned by another user, on a read-only volume)
+            // falls back to the download so they can install it by hand.
+            if name.lowercased().hasSuffix(".zip"), Self.canInstallInPlace {
+                let zip = try await download(asset, suggestedName: name,
+                                            directory: FileManager.default.temporaryDirectory)
+                try await installUpdate(zipAt: zip, version: release.version)
+                // installUpdate quits the app on success; nothing runs past it.
+            } else {
+                let dest = try await download(asset, suggestedName: name)
+                phase = .downloaded(dest)
+                NSWorkspace.shared.activateFileViewerSelecting([dest])
+            }
         } catch {
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    /// Whether the running bundle can be replaced in place: its location and the
+    /// directory it lives in must both be writable by this user. A drag-installed
+    /// `/Applications/Glancekit.app` is user-owned and passes; a copy installed by
+    /// another admin, or one on a read-only mount, does not.
+    private static var canInstallInPlace: Bool {
+        let fm = FileManager.default
+        let bundle = Bundle.main.bundleURL
+        return fm.isWritableFile(atPath: bundle.path)
+            && fm.isWritableFile(atPath: bundle.deletingLastPathComponent().path)
     }
 
     // MARK: - Networking
@@ -96,7 +130,10 @@ final class UpdateChecker {
             throw NetworkClient.NetworkError.decoding("Unexpected releases payload")
         }
 
-        // Prefer a .dmg, then a .zip, from the release's uploaded assets.
+        // Prefer a .zip (installable in place), then a .dmg, from the release's
+        // uploaded assets. HTTPS-only: this download is the trust boundary for an
+        // ad-hoc-signed app the updater will unpack and run, so a non-https asset
+        // URL is rejected rather than fetched over a channel we can't authenticate.
         var assetURL: URL?
         var assetName: String?
         if let assets = json["assets"] as? [[String: Any]] {
@@ -105,7 +142,8 @@ final class UpdateChecker {
                 guard let name = asset["name"] as? String,
                       Self.isDownloadable(name),
                       let urlString = asset["browser_download_url"] as? String,
-                      let url = URL(string: urlString)
+                      let url = URL(string: urlString),
+                      url.scheme?.lowercased() == "https"
                 else { continue }
                 assetURL = url
                 assetName = name
@@ -122,11 +160,14 @@ final class UpdateChecker {
         )
     }
 
-    /// Sort key so `.dmg` assets are preferred over `.zip`.
+    /// Sort key so a `.zip` is preferred over a `.dmg`. The zip is a bare app
+    /// bundle this updater can unpack and swap in place; the dmg is the manual,
+    /// drag-to-install fallback. (Prior to in-place updates this order was
+    /// reversed.)
     private func rank(_ asset: [String: Any]) -> Int {
         let name = (asset["name"] as? String ?? "").lowercased()
-        if name.hasSuffix(".dmg") { return 0 }
-        if name.hasSuffix(".zip") { return 1 }
+        if name.hasSuffix(".zip") { return 0 }
+        if name.hasSuffix(".dmg") { return 1 }
         return 2
     }
 
@@ -135,12 +176,13 @@ final class UpdateChecker {
     /// `URLSession.download(from:)` is the shorter call, but it hands back only a
     /// finished file: there is no byte-level callback anywhere in it, which is why
     /// this went through a delegate instead.
-    private func download(_ url: URL, suggestedName: String?) async throws -> URL {
+    private func download(_ url: URL, suggestedName: String?, directory: URL? = nil) async throws -> URL {
         // Indeterminate until the first callback tells us whether a total exists.
         phase = .downloading(progress: nil)
         progressFloor = -1
 
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        let downloads = directory
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let name = suggestedName ?? url.lastPathComponent
 
@@ -176,6 +218,169 @@ final class UpdateChecker {
         }
     }
 
+    // MARK: - In-place install
+
+    /// Unpack the downloaded `.zip`, validate the app inside it, then hand the
+    /// swap to a detached helper and quit so the helper can overwrite our
+    /// now-idle bundle and relaunch us. On any failure before the helper starts,
+    /// the temp working directory is cleaned up and the error surfaces as
+    /// `.failed`; once the helper is running the app terminates and never returns.
+    private func installUpdate(zipAt zip: URL, version: String) async throws {
+        phase = .installing
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory
+            .appendingPathComponent("GlancekitUpdate-\(UUID().uuidString)", isDirectory: true)
+
+        do {
+            try fm.createDirectory(at: work, withIntermediateDirectories: true)
+            // `ditto -x -k` mirrors the `ditto -c -k` that built the release zip,
+            // merging its AppleDouble metadata instead of scattering ._ files.
+            try await Self.runProcess("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
+            // The archive is unpacked; the zip itself is dead weight now. (On the
+            // failure path below the catch removes it too.)
+            try? FileManager.default.removeItem(at: zip)
+
+            guard let newApp = Self.locateApp(in: work) else {
+                throw NetworkClient.NetworkError.decoding("Update archive had no .app bundle")
+            }
+            try await Self.validate(newApp, expectedVersion: version)
+
+            try Self.launchSwapHelper(newApp: newApp, dest: Bundle.main.bundleURL, workDir: work)
+        } catch {
+            try? fm.removeItem(at: work)
+            try? fm.removeItem(at: zip)
+            throw error
+        }
+
+        // The helper is waiting on our PID. Quit so it can replace the bundle.
+        phase = .relaunching
+        NSApp.terminate(nil)
+    }
+
+    /// The first `*.app` at the archive's top level (the release zip stores it as
+    /// `Glancekit.app/…`, but tolerate a leading folder just in case).
+    nonisolated private static func locateApp(in dir: URL) -> URL? {
+        let fm = FileManager.default
+        let top = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        if let app = top.first(where: { $0.pathExtension == "app" }) { return app }
+        for sub in top where (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            let inner = (try? fm.contentsOfDirectory(at: sub, includingPropertiesForKeys: nil)) ?? []
+            if let app = inner.first(where: { $0.pathExtension == "app" }) { return app }
+        }
+        return nil
+    }
+
+    /// Refuse to install anything that isn't the same app bundle id, at least the
+    /// version the release advertised, with an intact code signature.
+    ///
+    /// On trust: the app is ad-hoc signed (no Developer ID, no Team ID), so there
+    /// is no stable signer identity to pin a Designated Requirement against. The
+    /// real integrity boundary is the HTTPS fetch from GitHub (enforced by the
+    /// `https` scheme guard on the asset URL). `codesign -v --strict` here is an
+    /// integrity check — it catches a bundle that arrived corrupted or truncated
+    /// through download and unpack — not attacker authentication, which ad-hoc
+    /// signing cannot provide.
+    nonisolated private static func validate(_ app: URL, expectedVersion: String) async throws {
+        guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
+            throw NetworkClient.NetworkError.decoding("Update bundle has no Info.plist")
+        }
+        let newID = info["CFBundleIdentifier"] as? String
+        guard newID == Bundle.main.bundleIdentifier else {
+            throw NetworkClient.NetworkError.decoding("Update bundle identifier mismatch")
+        }
+        let newVersion = info["CFBundleShortVersionString"] as? String ?? "0"
+        guard isNewer(newVersion, than: expectedVersion) || normalize(newVersion) == normalize(expectedVersion) else {
+            throw NetworkClient.NetworkError.decoding("Update bundle is version \(newVersion), expected \(expectedVersion)")
+        }
+        // `codesign -v` returns non-zero on a broken/altered signature.
+        do {
+            try await runProcess("/usr/bin/codesign", ["-v", "--strict", app.path])
+        } catch {
+            throw NetworkClient.NetworkError.decoding("Downloaded update failed its code-signature check")
+        }
+    }
+
+    /// Write a swap-and-relaunch script, launch it detached, and return. The
+    /// script outlives us on purpose: it waits for this PID to exit, replaces the
+    /// bundle **in place** (rsync --delete keeps the bundle directory itself, so
+    /// chronod doesn't prune placed-widget instances — the same reason
+    /// scripts/install.sh never `rm -rf`s the destination), clears the download
+    /// quarantine, re-registers with LaunchServices, restarts the widget daemons,
+    /// and reopens the app.
+    nonisolated private static func launchSwapHelper(newApp: URL, dest: URL, workDir: URL) throws {
+        let lsregister = "/System/Library/Frameworks/CoreServices.framework"
+            + "/Frameworks/LaunchServices.framework/Support/lsregister"
+        let script = """
+        #!/bin/bash
+        set -u
+        # A launchd-spawned GUI child can inherit a minimal or empty PATH, so pin
+        # one that resolves the bare tool names used below (lsregister stays a full
+        # path — it does not live on PATH).
+        export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+        pid="$1"; new="$2"; dst="$3"; work="$4"
+        # Wait (up to ~15s) for the old app to release its executable.
+        for _ in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+        # If it is still alive, the old executable is still memory-mapped and
+        # overwriting the bundle now would corrupt the running app. Abort rather
+        # than relaunch a half-clobbered install; the user keeps the old version.
+        if kill -0 "$pid" 2>/dev/null; then rm -rf "$work"; exit 1; fi
+        # Swap contents while keeping the bundle directory in place. --checksum
+        # compares by content, not size+mtime: two builds of the same file can
+        # share both, and rsync's default quick-check would then skip the very
+        # executable we're here to replace. Plain -a (no -X): macOS's bundled
+        # rsync rejects -X, and the metadata that matters for an app bundle — the
+        # _CodeSignature files — travels as ordinary files; quarantine is cleared
+        # below. This mirrors scripts/install.sh's proven in-place copy.
+        # A failed copy must not fall through to `open`, which would relaunch a
+        # partially written bundle.
+        if [ -d "$dst" ]; then
+          rsync -a --delete --checksum "$new/" "$dst/" || { rm -rf "$work"; exit 1; }
+        else
+          ditto "$new" "$dst" || { rm -rf "$work"; exit 1; }
+        fi
+        xattr -dr com.apple.quarantine "$dst" 2>/dev/null || true
+        "\(lsregister)" -f -R "$dst" 2>/dev/null || true
+        killall pkd chronod 2>/dev/null || true
+        open "$dst"
+        rm -rf "$work"
+        """
+        let scriptURL = workDir.appendingPathComponent("swap.sh")
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
+        proc.arguments = [
+            scriptURL.path,
+            String(ProcessInfo.processInfo.processIdentifier),
+            newApp.path,
+            dest.path,
+            workDir.path,
+        ]
+        // Detach from our stdio so the child isn't tied to a pipe we're closing.
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        proc.standardInput = FileHandle.nullDevice
+        try proc.run()   // fire-and-forget; do not wait — we're about to exit
+    }
+
+    /// Run a tool and await its exit off the main actor, throwing on non-zero.
+    nonisolated private static func runProcess(_ launchPath: String, _ args: [String]) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: launchPath)
+            proc.arguments = args
+            proc.terminationHandler = { p in
+                if p.terminationStatus == 0 {
+                    cont.resume()
+                } else {
+                    cont.resume(throwing: NetworkClient.NetworkError.decoding(
+                        "\(URL(fileURLWithPath: launchPath).lastPathComponent) exited \(p.terminationStatus)"))
+                }
+            }
+            do { try proc.run() } catch { cont.resume(throwing: error) }
+        }
+    }
+
     // MARK: - Helpers
 
     private static func isDownloadable(_ name: String) -> Bool {
@@ -205,7 +410,7 @@ final class UpdateChecker {
     }
 
     /// Strip a leading "v" and any pre-release/build suffix for comparison.
-    static func normalize(_ tag: String) -> String {
+    nonisolated static func normalize(_ tag: String) -> String {
         var s = tag.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("v") || s.hasPrefix("V") { s.removeFirst() }
         // Keep only the numeric dotted core (drop "-beta.1", "+build", etc.).
@@ -216,7 +421,7 @@ final class UpdateChecker {
     }
 
     /// Semantic-ish comparison of dotted numeric versions ("1.2.0" > "1.1.9").
-    static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+    nonisolated static func isNewer(_ lhs: String, than rhs: String) -> Bool {
         let a = normalize(lhs).split(separator: ".").map { Int($0) ?? 0 }
         let b = normalize(rhs).split(separator: ".").map { Int($0) ?? 0 }
         for i in 0..<max(a.count, b.count) {
