@@ -31,22 +31,23 @@ struct GlancekitApp: App {
         quickSwitch.seed(with: registry.plugins.map(\.id))
 
         // ── Global shortcuts ──────────────────────────────────────────────
-        // A glance action toggles its tool window open at the mouse (Colors on
-        // ⌥1, Notes on ⌥2 by default); Quick Switch steps through the ring
-        // (⌥⇥); Open Settings
-        // fronts the Settings window (⌥`). All are rebindable on the Shortcuts
-        // settings page.
-        let hotkeys = HotkeyCenter()
-        for action in ShortcutAction.allCases {
+        // Every glance gets an action that toggles its tool window open at the
+        // mouse (Colors on ⌥1, Notes on ⌥2 by default; the rest start unbound);
+        // Quick Switch steps through the ring (⌥⇥); Open Settings fronts the
+        // Settings window (⌥`). All are rebindable on the Shortcuts settings
+        // page. The glance actions are derived from the registry, so registering
+        // a new plugin makes it assignable with no wiring change here.
+        let hotkeys = HotkeyCenter(glancePluginIDs: registry.plugins.map(\.id))
+        for action in hotkeys.allActions {
             hotkeys.setHandler(for: action) {
                 switch action {
                 case .quickSwitch:
                     ToolWindowManager.shared.quickSwitch(among: quickSwitch.ring(in: registry))
-                case .colors, .notes:
-                    guard let plugin = action.pluginID.flatMap(registry.plugin(id:)) else { return }
-                    ToolWindowManager.shared.toggle(plugin: plugin)
                 case .settings:
                     SettingsWindowPresenter.toggle()
+                case .glance(let pluginID):
+                    guard let plugin = registry.plugin(id: pluginID) else { return }
+                    ToolWindowManager.shared.toggle(plugin: plugin)
                 }
             }
         }
