@@ -61,6 +61,11 @@ enum SettingsWindowPresenter {
         DispatchQueue.main.async {
             guard let window else { return }
             window.level = .normal
+            // Without this the window stays pinned to the Space it was first
+            // created on: on a Mac with several Spaces, opening it from another
+            // Space would either yank you across or show nothing. `.moveToActiveSpace`
+            // brings the existing window to whichever Space you're on now.
+            window.collectionBehavior.insert(.moveToActiveSpace)
             moveToActiveScreen(window)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
