@@ -45,7 +45,7 @@ struct SettingsView: View {
     /// The Assistant glance's id — promoted to a top-of-General sidebar entry.
     /// Its detail pane is its plugin `settingsSection()`, resolved the same way
     /// as any other plugin selection (`detail` / `detailTitle` need no change).
-    private static let assistantPluginID = "ai"
+    private static let assistantPluginID = PluginRegistry.assistantPluginID
 
     /// Bridges the registry's `nil`-means-Glances contract to a `List` selection
     /// where `nil` means nothing is selected.
@@ -178,6 +178,17 @@ struct SettingsView: View {
 
     // MARK: - Glances page
 
+    /// The Assistant is pinned and configured from its own General page, so it's
+    /// kept out of the enable/reorder lists here — you can't turn it off or drag
+    /// it among the ordinary glances.
+    private var enabledGlances: [any GlancePlugin] {
+        registry.enabledPluginsInOrder.filter { $0.id != Self.assistantPluginID }
+    }
+
+    private var disabledGlances: [any GlancePlugin] {
+        registry.disabledPluginsInOrder.filter { $0.id != Self.assistantPluginID }
+    }
+
     private var glancesPage: some View {
         VStack(alignment: .leading, spacing: 8) {
             updateRow
@@ -197,21 +208,21 @@ struct SettingsView: View {
             // among those rows alone. A disabled glance keeps its slot behind the
             // scenes and returns to it when switched back on.
             List {
-                if !registry.enabledPluginsInOrder.isEmpty {
+                if !enabledGlances.isEmpty {
                     Section("Enabled") {
-                        ForEach(registry.enabledPluginsInOrder, id: \.id, content: row)
+                        ForEach(enabledGlances, id: \.id, content: row)
                             .onMove { offsets, dest in
-                                registry.move(enabled: true, fromOffsets: offsets, toOffset: dest)
+                                registry.move(group: enabledGlances.map(\.id), fromOffsets: offsets, toOffset: dest)
                                 coordinator.reconcile()
                             }
                     }
                 }
 
-                if !registry.disabledPluginsInOrder.isEmpty {
+                if !disabledGlances.isEmpty {
                     Section("Disabled") {
-                        ForEach(registry.disabledPluginsInOrder, id: \.id, content: row)
+                        ForEach(disabledGlances, id: \.id, content: row)
                             .onMove { offsets, dest in
-                                registry.move(enabled: false, fromOffsets: offsets, toOffset: dest)
+                                registry.move(group: disabledGlances.map(\.id), fromOffsets: offsets, toOffset: dest)
                             }
                     }
                 }

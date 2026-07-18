@@ -10,6 +10,12 @@ import Observation
 @Observable
 final class PluginRegistry {
 
+    /// The Assistant glance's id. It's a pinned, app-wide page (its settings live
+    /// at the top of the General sidebar and it stays in the popover regardless of
+    /// the Smart Panel choice), so it's deliberately kept out of the enable/reorder
+    /// and Quick Switch lists — the settings views filter on this.
+    static let assistantPluginID = "ai"
+
     /// All known plugins, in registration order. This is the master list;
     /// user ordering is applied on top via `orderedIDs`.
     private(set) var plugins: [any GlancePlugin] = []
@@ -154,16 +160,18 @@ final class PluginRegistry {
         orderedPlugins.filter { !enabledIDs.contains($0.id) }
     }
 
-    /// Move a plugin within one half of the list (for drag-to-reorder in
-    /// Settings, which lists the enabled and disabled glances as separate
-    /// groups). Offsets are relative to that group alone.
+    /// Reorder a group of glances shown together in Settings (the enabled or the
+    /// disabled section), where `group` is exactly the ids the list displayed and
+    /// the offsets are relative to that list. Passing the displayed ids — rather
+    /// than deriving them here — lets a caller drag among a filtered subset (e.g.
+    /// with the pinned Assistant hidden) without the offsets drifting.
     ///
     /// The moved ids are written back into the slots that group already occupied
     /// in `orderedIDs`, so reordering the enabled glances never shifts a disabled
-    /// one out from between its neighbors — it stays put and keeps the position
-    /// it will reappear at when switched back on.
-    func move(enabled: Bool, fromOffsets: IndexSet, toOffset: Int) {
-        var group = (enabled ? enabledPluginsInOrder : disabledPluginsInOrder).map { $0.id }
+    /// (or filtered-out) one out from between its neighbors — it stays put and
+    /// keeps the position it will reappear at when switched back on.
+    func move(group: [String], fromOffsets: IndexSet, toOffset: Int) {
+        var group = group
         group.move(fromOffsets: fromOffsets, toOffset: toOffset)
 
         // Only ids that resolved to a registered plugin are in `group`; matching
