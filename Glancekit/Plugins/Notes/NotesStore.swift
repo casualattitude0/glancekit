@@ -203,9 +203,15 @@ final class NotesStore {
 
     func delete(_ note: Note) {
         notes.removeAll { $0.id == note.id }
-        // The field was editing what no longer exists; saving it would file a
-        // surprise duplicate, so let it go back to being a new note.
-        if editingID == note.id { editingID = nil }
+        // The field was editing what no longer exists. Clearing `editingID`
+        // alone leaves its text behind in the draft, which then looks like an
+        // unsaved *new* note — so the next `edit()`/`newNote()` would bank it
+        // and resurrect the note just deleted. Drop the draft too, so deleting
+        // the note you're editing empties the field and stays deleted.
+        if editingID == note.id {
+            editingID = nil
+            draft = ""
+        }
         persistNotes()
     }
 

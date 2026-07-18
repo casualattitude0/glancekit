@@ -290,6 +290,10 @@ struct AIClient {
 
         var body: [String: Any] = [
             "model": config.model,
+            // Cap output so credit-gated gateways (e.g. OpenRouter) reserve
+            // against this value instead of the model's max (often 65536),
+            // which trips a 402 on low-balance accounts.
+            "max_tokens": 2048,
             "messages": messages,
         ]
         if !tools.isEmpty {

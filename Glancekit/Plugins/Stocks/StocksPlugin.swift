@@ -50,25 +50,32 @@ final class StocksPlugin: GlancePlugin {
         }
     }
 
-    /// Surfaces the watchlist's biggest mover with its intraday sparkline. A
-    /// large swing earns a higher priority; a flat day stays ambient. After the
-    /// close, a barely-moved ticker is suppressed entirely — a stale flat quote
-    /// overnight isn't worth a card.
+    /// Surfaces the watchlist's biggest mover with its intraday sparkline — but
+    /// only when the day's swing is large enough to be worth interrupting for.
+    /// Markets wiggle a percent or two constantly; treating that as news lets the
+    /// stock card claim the feed (and the brief's headline) on almost every open.
+    /// So the bar to appear at all is a real move, and only an outsized one earns
+    /// the `.elevated` rank that floats it to the top. A quiet or barely-moved
+    /// day surfaces nothing — the watchlist is still one click away in the popover.
     func currentSignal() -> GlanceSignal? {
         guard let mover = quotes.max(by: { abs($0.changePercent) < abs($1.changePercent) }) else {
             return nil
         }
         let magnitude = abs(mover.changePercent)
-        // Context: after hours, only a genuine mover earns a slot.
-        if !marketProbablyOpen && magnitude < 2 { return nil }
+        // Below this, a stock has nothing time-sensitive to say — stay out of the
+        // feed rather than filling it with routine noise. The threshold is higher
+        // after the close, where a stale flat quote is even less worth a card.
+        let floor: Double = marketProbablyOpen ? 3 : 5
+        if magnitude < floor { return nil }
 
         let headline = String(format: "%@ %@%.2f%% · %.2f",
                               mover.symbol, mover.isUp ? "+" : "−", magnitude, mover.price)
         let tint: Color = mover.isUp ? .green : .red
         let priority: GlanceSignal.Priority
-        if magnitude >= 5 { priority = .elevated }
-        else if magnitude >= 2 { priority = .normal }
-        else { priority = .ambient }
+        // Only a genuinely outsized move (≥8%) earns the elevated rank that leads
+        // the brief; a merely notable one sits at normal, below anything urgent.
+        if magnitude >= 8 { priority = .elevated }
+        else { priority = .normal }
         return GlanceSignal(priority: priority, score: magnitude,
                             headline: headline,
                             detail: marketProbablyOpen ? nil : "At last close",

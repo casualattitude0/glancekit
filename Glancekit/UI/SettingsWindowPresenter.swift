@@ -61,9 +61,43 @@ enum SettingsWindowPresenter {
         DispatchQueue.main.async {
             guard let window else { return }
             window.level = .normal
+            // Without this the window stays pinned to the Space it was first
+            // created on: on a Mac with several Spaces, opening it from another
+            // Space would either yank you across or show nothing. `.moveToActiveSpace`
+            // brings the existing window to whichever Space you're on now.
+            window.collectionBehavior.insert(.moveToActiveSpace)
+            moveToActiveScreen(window)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
         }
+    }
+
+    /// Brings the Settings window onto the screen the user is working on before
+    /// it's shown. The `Settings` scene restores its last frame, so on a
+    /// multi-display Mac it otherwise reappears on whatever screen it closed on —
+    /// not the one you're on now. "Active" is the screen under the cursor, the
+    /// same anchor the glance tool windows use.
+    ///
+    /// Only moves the window when it isn't already on that screen, so a window you
+    /// positioned deliberately on the active screen keeps its spot; a wrong-screen
+    /// one is re-centered on the active screen's visible area.
+    private static func moveToActiveScreen(_ window: NSWindow) {
+        let mouse = NSEvent.mouseLocation
+        guard let target = NSScreen.screens.first(where: { $0.frame.contains(mouse) })
+            ?? NSScreen.main else { return }
+
+        // Already on the active screen: leave a deliberately-placed window put.
+        if let current = window.screen, current.frame == target.frame { return }
+
+        let visible = target.visibleFrame
+        let size = window.frame.size
+        // Centered, then clamped so an oversized window still shows its top-left
+        // controls rather than opening half off the edge or under the menu bar.
+        let origin = NSPoint(
+            x: max(visible.minX, min(visible.midX - size.width / 2, visible.maxX - size.width)),
+            y: max(visible.minY, min(visible.midY - size.height / 2, visible.maxY - size.height))
+        )
+        window.setFrameOrigin(origin)
     }
 
     /// Opens Settings from outside a SwiftUI view (the hotkey handler, the tour).

@@ -115,6 +115,9 @@ struct QuickSwitchSettingsView: View {
     /// displayed, not a second order to keep in step.
     private var rows: [Row] {
         quickSwitch.orderedIDs.compactMap { id in
+            // The Assistant is a pinned, app-wide page, not a glance the ring
+            // steps through — keep it out of the Quick Switch lists entirely.
+            guard id != PluginRegistry.assistantPluginID else { return nil }
             guard let plugin = registry.plugin(id: id) else { return nil }
             let isEnabled = registry.isEnabled(id)
             return Row(

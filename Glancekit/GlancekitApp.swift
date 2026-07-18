@@ -58,7 +58,14 @@ struct GlancekitApp: App {
             hotkeys.setHandler(for: action) {
                 switch action {
                 case .quickSwitch:
-                    ToolWindowManager.shared.quickSwitch(among: quickSwitch.ring(in: registry))
+                    ToolWindowManager.shared.quickSwitch(
+                        among: quickSwitch.ring(in: registry),
+                        // The Assistant is pinned independently of the ring, so it
+                        // stays reachable even when the user hasn't included it —
+                        // the "get AI help, jump back" affordance.
+                        assistant: registry.plugin(id: "ai"),
+                        shortcut: hotkeys.shortcut(for: .quickSwitch)?.displayString
+                    )
                 case .settings:
                     SettingsWindowPresenter.toggle()
                 case .openMenubar:

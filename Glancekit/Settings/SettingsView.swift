@@ -45,7 +45,7 @@ struct SettingsView: View {
     /// The Assistant glance's id — promoted to a top-of-General sidebar entry.
     /// Its detail pane is its plugin `settingsSection()`, resolved the same way
     /// as any other plugin selection (`detail` / `detailTitle` need no change).
-    private static let assistantPluginID = "ai"
+    private static let assistantPluginID = PluginRegistry.assistantPluginID
 
     /// Bridges the registry's `nil`-means-Glances contract to a `List` selection
     /// where `nil` means nothing is selected.
@@ -111,23 +111,32 @@ struct SettingsView: View {
                     .tutorialAnchor(SettingsSection.quickSwitch)
             }
 
-            Section("Glances") {
-                // Enabled first, then disabled; alphabetical by title within each
-                // group — so the sidebar mirrors the enable grouping on the
-                // Glances page but reads in a predictable A–Z order. The
-                // Assistant is filtered out here — it lives in General above.
-                let byTitle: (any GlancePlugin, any GlancePlugin) -> Bool = {
-                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-                }
-                let sidebarPlugins = (registry.enabledPluginsInOrder.sorted(by: byTitle)
-                    + registry.disabledPluginsInOrder.sorted(by: byTitle))
-                    .filter { $0.id != Self.assistantPluginID }
-                ForEach(sidebarPlugins, id: \.id) { plugin in
-                    Label(plugin.title, systemImage: plugin.iconSystemName)
-                        // Dim the disabled ones: their settings stay reachable,
-                        // but the sidebar shows at a glance what's turned off.
-                        .foregroundStyle(registry.isEnabled(plugin.id) ? .primary : .secondary)
-                        .tag(plugin.id)
+            // One section per category, in `GlanceCategory` order, so the tools
+            // read as grouped families rather than one long list. Within a
+            // category: enabled first, then disabled, alphabetical by title in
+            // each group — mirroring the enable grouping on the Glances page but
+            // in a predictable A–Z order. Empty categories are dropped so a
+            // build with no finance glance shows no "Finance" header. The
+            // Assistant is filtered out — it lives in General above.
+            let byTitle: (any GlancePlugin, any GlancePlugin) -> Bool = {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+            let sidebarPlugins = (registry.enabledPluginsInOrder.sorted(by: byTitle)
+                + registry.disabledPluginsInOrder.sorted(by: byTitle))
+                .filter { $0.id != Self.assistantPluginID }
+            ForEach(GlanceCategory.allCases, id: \.self) { category in
+                let plugins = sidebarPlugins.filter { $0.category == category }
+                if !plugins.isEmpty {
+                    Section(category.title) {
+                        ForEach(plugins, id: \.id) { plugin in
+                            Label(plugin.title, systemImage: plugin.iconSystemName)
+                                // Dim the disabled ones: their settings stay
+                                // reachable, but the sidebar shows at a glance
+                                // what's turned off.
+                                .foregroundStyle(registry.isEnabled(plugin.id) ? .primary : .secondary)
+                                .tag(plugin.id)
+                        }
+                    }
                 }
             }
         }
@@ -169,6 +178,17 @@ struct SettingsView: View {
 
     // MARK: - Glances page
 
+    /// The Assistant is pinned and configured from its own General page, so it's
+    /// kept out of the enable/reorder lists here — you can't turn it off or drag
+    /// it among the ordinary glances.
+    private var enabledGlances: [any GlancePlugin] {
+        registry.enabledPluginsInOrder.filter { $0.id != Self.assistantPluginID }
+    }
+
+    private var disabledGlances: [any GlancePlugin] {
+        registry.disabledPluginsInOrder.filter { $0.id != Self.assistantPluginID }
+    }
+
     private var glancesPage: some View {
         VStack(alignment: .leading, spacing: 8) {
             updateRow
@@ -188,21 +208,21 @@ struct SettingsView: View {
             // among those rows alone. A disabled glance keeps its slot behind the
             // scenes and returns to it when switched back on.
             List {
-                if !registry.enabledPluginsInOrder.isEmpty {
+                if !enabledGlances.isEmpty {
                     Section("Enabled") {
-                        ForEach(registry.enabledPluginsInOrder, id: \.id, content: row)
+                        ForEach(enabledGlances, id: \.id, content: row)
                             .onMove { offsets, dest in
-                                registry.move(enabled: true, fromOffsets: offsets, toOffset: dest)
+                                registry.move(group: enabledGlances.map(\.id), fromOffsets: offsets, toOffset: dest)
                                 coordinator.reconcile()
                             }
                     }
                 }
 
-                if !registry.disabledPluginsInOrder.isEmpty {
+                if !disabledGlances.isEmpty {
                     Section("Disabled") {
-                        ForEach(registry.disabledPluginsInOrder, id: \.id, content: row)
+                        ForEach(disabledGlances, id: \.id, content: row)
                             .onMove { offsets, dest in
-                                registry.move(enabled: false, fromOffsets: offsets, toOffset: dest)
+                                registry.move(group: disabledGlances.map(\.id), fromOffsets: offsets, toOffset: dest)
                             }
                     }
                 }
