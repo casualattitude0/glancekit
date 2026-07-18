@@ -4,6 +4,7 @@ import SwiftUI
 /// which is where every glance's content lives.
 struct MenuBarLabelView: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @Environment(RefreshCoordinator.self) private var coordinator
 
     @State private var didOfferOnboarding = false
@@ -11,6 +12,13 @@ struct MenuBarLabelView: View {
     var body: some View {
         Image(systemName: "square.grid.2x2")
             .onAppear {
+                // Hand the presenter SwiftUI's `openSettings` action so the Open
+                // Settings hotkey (and the guided tour) can open the window on
+                // the first press, instead of no-opping until Settings has been
+                // opened some other way. The label is built at launch, so this
+                // registers before any hotkey can fire.
+                SettingsWindowPresenter.registerOpenAction { openSettings() }
+
                 // The label is the one view MenuBarExtra builds at launch; the
                 // popover content stays unbuilt until the first click. Starting
                 // here is a deliberate call by the owner: glances refresh from

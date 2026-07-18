@@ -9,6 +9,21 @@ import AppKit
 enum SettingsWindowPresenter {
     private static let windowIdentifier = "com_apple_SwiftUI_Settings_window"
 
+    /// SwiftUI's `openSettings` environment action, captured from a long-lived
+    /// view at launch (see `MenuBarLabelView`). The `showSettingsWindow:`
+    /// selector `present()` falls back to only reaches a target once the
+    /// `Settings` scene has already been instantiated — so the first ⌥-shortcut
+    /// press did nothing until the user had opened Settings some other way. The
+    /// SwiftUI action instantiates the scene itself, so it works on the very
+    /// first press. `nil` only in the sliver before the label's `onAppear` runs.
+    private static var openSettingsAction: (() -> Void)?
+
+    /// Register SwiftUI's `openSettings` action so the hotkey path can open
+    /// Settings as reliably as the popover's gear button does.
+    static func registerOpenAction(_ action: @escaping () -> Void) {
+        openSettingsAction = action
+    }
+
     private static var window: NSWindow? {
         NSApp.windows.first { $0.identifier?.rawValue == windowIdentifier }
     }
@@ -51,9 +66,16 @@ enum SettingsWindowPresenter {
         }
     }
 
-    /// Opens Settings from outside a SwiftUI view, where the `openSettings`
-    /// environment action isn't reachable.
+    /// Opens Settings from outside a SwiftUI view (the hotkey handler, the tour).
+    /// Prefers the registered `openSettings` action, which reliably creates the
+    /// `Settings` scene on the first press; the `showSettingsWindow:` selector is
+    /// only a fallback for the brief window before that action is registered, and
+    /// it silently does nothing until the scene already exists.
     static func present() {
-        present { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+        if let openSettingsAction {
+            present(using: openSettingsAction)
+        } else {
+            present { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+        }
     }
 }
