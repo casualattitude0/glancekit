@@ -162,6 +162,17 @@ final class NotesStore {
         editingID = note.id
     }
 
+    /// Starts a fresh, empty draft — the compose button.
+    ///
+    /// Loss-averse, like `edit`: an in-progress *new* draft is banked first so
+    /// starting a new note doesn't throw away what you were writing. Abandoning
+    /// an edit of a saved note leaves that note untouched.
+    func newNote() {
+        if editingID == nil && canSave { save() }
+        draft = ""
+        editingID = nil
+    }
+
     /// Empties the field. Editing a saved note leaves that note untouched —
     /// this is "stop editing", not "delete".
     func clearDraft() {
