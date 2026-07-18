@@ -391,7 +391,7 @@ private func habitsScheduleText(_ schedule: Habit.Schedule) -> String {
 
 private struct HabitsPopover: View {
     @Bindable var plugin: HabitsPlugin
-    @State private var detailHabit: Habit?
+    @State private var route: HabitsSheetRoute?
 
     private var due: [Habit] { plugin.habitsDueToday() }
     private var notDue: [Habit] {
@@ -402,32 +402,48 @@ private struct HabitsPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if plugin.activeHabits.isEmpty {
-                HabitsEmptyState()
+                HabitsEmptyState { route = .add }
             } else {
                 HStack {
                     Text("\(doneCount)/\(due.count) done today")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
+                    Button {
+                        route = .add
+                    } label: {
+                        Image(systemName: "plus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Add a habit")
                 }
 
                 ForEach(due) { habit in
                     HabitsRow(plugin: plugin, habit: habit, restDay: false) {
-                        detailHabit = habit
+                        route = .detail(habit.id)
                     }
                 }
                 if !notDue.isEmpty {
                     ForEach(notDue) { habit in
                         HabitsRow(plugin: plugin, habit: habit, restDay: true) {
-                            detailHabit = habit
+                            route = .detail(habit.id)
                         }
                     }
                 }
             }
         }
         .task { await plugin.refresh() }
-        .sheet(item: $detailHabit) { habit in
-            HabitsDetail(plugin: plugin, habitID: habit.id)
+        .sheet(item: $route) { route in
+            switch route {
+            case .add:
+                HabitsEditor(plugin: plugin, habitID: nil)
+            case .edit(let id):
+                HabitsEditor(plugin: plugin, habitID: id)
+            case .detail(let id):
+                HabitsDetail(plugin: plugin, habitID: id) { editID in
+                    self.route = .edit(editID)
+                }
+            }
         }
     }
 }
@@ -491,13 +507,22 @@ private struct HabitsRow: View {
 }
 
 private struct HabitsEmptyState: View {
+    var onAdd: () -> Void = {}
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("No habits yet", systemImage: "checkmark.seal")
                 .font(.body.weight(.semibold))
-            Text("Add a habit in Settings to start building a streak.")
+            Text("Add your first habit to start building a streak.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Button {
+                onAdd()
+            } label: {
+                Label("Add a habit", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -508,6 +533,10 @@ private struct HabitsEmptyState: View {
 private struct HabitsDetail: View {
     @Bindable var plugin: HabitsPlugin
     let habitID: UUID
+    /// When set, an Edit button appears that routes to the habit editor. Lets the
+    /// detail sheet double as the entry point for editing from the habit window,
+    /// so you never have to open Settings to change a habit.
+    var onEdit: ((UUID) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var confirmReset = false
 
@@ -522,6 +551,13 @@ private struct HabitsDetail: View {
                         .foregroundStyle(.secondary)
                     Text(habit.name).font(.title3.weight(.bold))
                     Spacer()
+                    if let onEdit {
+                        Button {
+                            onEdit(habitID)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                    }
                     Button("Done") { dismiss() }
                 }
 
@@ -643,11 +679,13 @@ private struct HabitsHeatStrip: View {
 // MARK: - Settings UI
 
 private enum HabitsSheetRoute: Identifiable {
+    case add
     case edit(UUID)
     case detail(UUID)
 
     var id: String {
         switch self {
+        case .add: return "add"
         case .edit(let id): return "edit-\(id.uuidString)"
         case .detail(let id): return "detail-\(id.uuidString)"
         }
@@ -751,10 +789,14 @@ private struct HabitsSettings: View {
         }
         .sheet(item: $route) { route in
             switch route {
+            case .add:
+                HabitsEditor(plugin: plugin, habitID: nil)
             case .edit(let id):
                 HabitsEditor(plugin: plugin, habitID: id)
             case .detail(let id):
-                HabitsDetail(plugin: plugin, habitID: id)
+                HabitsDetail(plugin: plugin, habitID: id) { editID in
+                    self.route = .edit(editID)
+                }
             }
         }
     }
@@ -893,7 +935,8 @@ private struct HabitsArchivedRow: View {
 
 private struct HabitsEditor: View {
     @Bindable var plugin: HabitsPlugin
-    let habitID: UUID
+    /// `nil` creates a brand-new habit; otherwise edits the habit with this id.
+    let habitID: UUID?
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String = ""
@@ -904,18 +947,26 @@ private struct HabitsEditor: View {
     @State private var target: Int = 3
     @State private var loaded = false
 
+    private var isNew: Bool { habitID == nil }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+
+    /// True unless we're editing a habit that has since been deleted out from
+    /// under us. Creating a new habit is always valid.
+    private var habitExists: Bool {
+        guard let habitID else { return true }
+        return plugin.habits.contains(where: { $0.id == habitID })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Edit habit").font(.headline)
+                Text(isNew ? "New habit" : "Edit habit").font(.headline)
                 Spacer()
                 Button("Cancel") { dismiss() }
             }
 
-            if plugin.habits.contains(where: { $0.id == habitID }) {
-                TextField("Name", text: $name)
+            if habitExists {
+                TextField("Name (e.g. Read 20 min)", text: $name)
                     .textFieldStyle(.roundedBorder)
 
                 HStack {
@@ -955,7 +1006,7 @@ private struct HabitsEditor: View {
 
                 HStack {
                     Spacer()
-                    Button("Save") { save() }
+                    Button(isNew ? "Add habit" : "Save") { save() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(trimmedName.isEmpty)
                 }
@@ -970,7 +1021,12 @@ private struct HabitsEditor: View {
     }
 
     private func load() {
-        guard !loaded, let h = plugin.habits.first(where: { $0.id == habitID }) else { return }
+        guard !loaded else { return }
+        // New habit: keep the default field values.
+        guard let habitID, let h = plugin.habits.first(where: { $0.id == habitID }) else {
+            loaded = true
+            return
+        }
         loaded = true
         name = h.name
         icon = h.icon
@@ -988,15 +1044,26 @@ private struct HabitsEditor: View {
     }
 
     private func save() {
-        guard var h = plugin.habits.first(where: { $0.id == habitID }) else { return }
         let n = trimmedName
         guard !n.isEmpty else { return }
         let trimmedIcon = icon.trimmingCharacters(in: .whitespaces)
-        h.name = n
-        h.icon = trimmedIcon.isEmpty ? "circle" : trimmedIcon
-        h.schedule = isDaily ? .daily : .weekdays(selectedWeekdays)
-        h.targetPerWeek = hasTarget ? target : nil
-        plugin.updateHabit(h)
+        let resolvedIcon = trimmedIcon.isEmpty ? "circle" : trimmedIcon
+        let schedule: Habit.Schedule = isDaily ? .daily : .weekdays(selectedWeekdays)
+        let resolvedTarget = hasTarget ? target : nil
+
+        if let habitID {
+            guard var h = plugin.habits.first(where: { $0.id == habitID }) else { return }
+            h.name = n
+            h.icon = resolvedIcon
+            h.schedule = schedule
+            h.targetPerWeek = resolvedTarget
+            plugin.updateHabit(h)
+        } else {
+            plugin.addHabit(Habit(name: n,
+                                  icon: resolvedIcon,
+                                  schedule: schedule,
+                                  targetPerWeek: resolvedTarget))
+        }
         dismiss()
     }
 }
