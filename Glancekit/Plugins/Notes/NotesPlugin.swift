@@ -26,53 +26,85 @@ final class NotesPlugin: GlancePlugin {
 private struct NotesPopover: View {
     @Bindable var store: NotesStore
 
-    /// Focus lands in the field when the window opens, so ⌥2 → paste → ⌘↩ works
-    /// without touching the mouse.
-    @FocusState private var isWriting: Bool
+    /// One-shot request to put the caret in the field when the window opens, so
+    /// ⌥2 → paste → ⌘↩ works without touching the mouse. The editor flips it
+    /// back to false once it has taken focus.
+    @State private var wantsFocus = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            NotesEditor(store: store, isWriting: $isWriting)
-            NotesActionRow(store: store, isWriting: $isWriting)
+        VStack(alignment: .leading, spacing: 8) {
+            NotesEditor(store: store, wantsFocus: $wantsFocus)
+            NotesStatusRow(store: store)
+            NotesActionRow(store: store, wantsFocus: $wantsFocus)
 
             if !store.notes.isEmpty {
                 Divider()
                 NotesList(store: store)
             }
         }
-        .onAppear { isWriting = true }
+        .frame(minWidth: 320)
+        .onAppear { wantsFocus = true }
     }
 }
 
 private struct NotesEditor: View {
     @Bindable var store: NotesStore
-    @FocusState.Binding var isWriting: Bool
+    @Binding var wantsFocus: Bool
 
     var body: some View {
-        // `TextEditor` has no placeholder of its own, hence the overlay.
-        TextEditor(text: $store.draft)
-            .font(.body)
-            .scrollContentBackground(.hidden)
-            .padding(6)
-            .frame(minHeight: 96)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(alignment: .topLeading) {
-                if store.draft.isEmpty {
-                    Text("Write or paste something…")
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 14)
-                        .allowsHitTesting(false)
-                }
+        // The custom editor draws no placeholder of its own, hence the overlay.
+        MarkdownEditor(
+            text: $store.draft,
+            focusMode: store.focusMode,
+            wantsFocus: $wantsFocus,
+            onCommandReturn: {
+                store.save()
+                wantsFocus = true
             }
-            .focused($isWriting)
+        )
+        .frame(minHeight: 200)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topLeading) {
+            if store.draft.isEmpty {
+                Text("Write or paste something…  **markdown** works")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 16)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+/// Word/character count on the left, focus-mode toggle on the right — the
+/// writing chrome iA Writer keeps at the edges of the page.
+private struct NotesStatusRow: View {
+    @Bindable var store: NotesStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("^[\(store.wordCount) word](inflect: true) · \(store.characterCount) characters")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+
+            Spacer()
+
+            Toggle(isOn: $store.focusMode) {
+                Label("Focus", systemImage: "scope")
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .font(.caption)
+            .help("Focus mode: dim everything but the paragraph you're writing")
+        }
     }
 }
 
 private struct NotesActionRow: View {
     @Bindable var store: NotesStore
-    @FocusState.Binding var isWriting: Bool
+    @Binding var wantsFocus: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -86,16 +118,17 @@ private struct NotesActionRow: View {
 
             Button(store.isEditing ? "Cancel" : "Clear") {
                 store.clearDraft()
-                isWriting = true
+                wantsFocus = true
             }
             .disabled(store.draft.isEmpty)
 
             Button(store.isEditing ? "Update" : "Save") {
                 store.save()
-                isWriting = true
+                wantsFocus = true
             }
             .buttonStyle(.borderedProminent)
-            // ↩ alone has to stay as-is: it's a newline in the field.
+            // ↩ alone has to stay as-is: it's a newline in the field. The editor
+            // also intercepts ⌘↩ directly, for when this button is disabled.
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!store.canSave)
             .help("Save this note (⌘↩)")
@@ -132,11 +165,11 @@ private struct NotesRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(note.title)
+                Text(note.renderedTitle)
                     .font(.callout)
                     .lineLimit(1)
                 if !note.detail.isEmpty {
-                    Text(note.detail)
+                    Text(note.renderedDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -191,7 +224,7 @@ private struct NotesSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Notes are stored on this Mac only, in plain text — don't keep passwords or other secrets here.")
+            Text("Notes are stored on this Mac only, as plain markdown — don't keep passwords or other secrets here.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

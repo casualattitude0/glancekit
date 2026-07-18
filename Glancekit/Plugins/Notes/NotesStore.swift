@@ -2,8 +2,9 @@ import AppKit
 import Foundation
 import Observation
 
-/// One saved note. Plain text on purpose — the point of this glance is to catch
-/// something before it's gone, not to format it.
+/// One saved note. Stored as plain markdown text — you edit the source, and the
+/// list rows render it. The point of the glance is still to catch something
+/// before it's gone; markdown just means what you catch keeps its shape.
 struct Note: Identifiable, Codable, Equatable {
     let id: UUID
     var text: String
@@ -35,6 +36,33 @@ struct Note: Identifiable, Codable, Equatable {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
+
+    /// The title line with its inline markdown rendered (bold, italic, code,
+    /// links), for the list row. A heading's leading `#`s are stripped so the
+    /// row reads as a title, not as raw source.
+    var renderedTitle: AttributedString {
+        Note.renderInline(stripHeadingMarks(from: title))
+    }
+
+    /// The collapsed remainder, inline-rendered the same way.
+    var renderedDetail: AttributedString {
+        Note.renderInline(detail)
+    }
+
+    private func stripHeadingMarks(from line: String) -> String {
+        guard let hashes = line.range(of: "^#{1,6}[ \\t]+", options: .regularExpression) else { return line }
+        return String(line[hashes.upperBound...])
+    }
+
+    /// Renders one line of markdown as inline-styled text, falling back to the
+    /// raw string if it doesn't parse. Block constructs are intentionally left
+    /// as-is — a row is a single line.
+    static func renderInline(_ string: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: string,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(string)
+    }
 }
 
 /// Owns the notes and the in-progress draft, and persists both to
@@ -62,17 +90,36 @@ final class NotesStore {
     /// Cleared on save, so the field always returns to composing a fresh note.
     private(set) var editingID: UUID?
 
+    /// iA-Writer-style focus mode: dim everything but the paragraph you're in.
+    /// A preference, so it sticks between sessions.
+    var focusMode: Bool = false {
+        didSet { defaults.set(focusMode, forKey: Self.focusModeKey) }
+    }
+
     private let defaults: UserDefaults
     private static let notesKey = "glancekit.notes.items"
     private static let draftKey = "glancekit.notes.draft"
+    private static let focusModeKey = "glancekit.notes.focusMode"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         draft = defaults.string(forKey: Self.draftKey) ?? ""
+        focusMode = defaults.bool(forKey: Self.focusModeKey)
         if let data = defaults.data(forKey: Self.notesKey),
            let decoded = try? JSONDecoder().decode([Note].self, from: data) {
             notes = decoded
         }
+    }
+
+    /// Live word count of the draft — whitespace-separated runs of non-space.
+    var wordCount: Int {
+        draft.split { $0.isWhitespace || $0.isNewline }.count
+    }
+
+    /// Live character count of the draft, excluding trailing whitespace so an
+    /// empty-but-for-a-newline draft reads as 0.
+    var characterCount: Int {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).count
     }
 
     /// Whether `save()` would do anything — a draft of pure whitespace doesn't
