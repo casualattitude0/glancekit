@@ -2,32 +2,70 @@
 
 A modular macOS menu bar suite for glancing at everything that matters — all in one place. Fully extensible, with no limit on what gets added next.
 
-Glancekit lives in your menu bar and surfaces at-a-glance information from a growing set of independent **glances** (plugins) — weather, stocks, GitHub activity, system stats, photos, and more. Click the menu bar item for a rich popover; each glance renders its own section and refreshes on its own schedule.
+Glancekit lives in your menu bar and surfaces at-a-glance information from a growing set of independent **glances** (plugins) — weather, stocks, GitHub activity, Mac health, world clocks, your next meeting, and many more. Click the menu bar item for a rich popover; each glance renders its own section and refreshes on its own schedule. Pop any glance out into its own standalone window, and let the **Smart Panel** surface only the glances that need attention right now.
 
 > **Requirements:** macOS 14.0+ and Xcode 15+ (Swift, SwiftUI, WidgetKit).
 
 ## Features
 
 - **Menu bar first** — an unobtrusive status-bar icon, a detailed popover on click.
-- **Modular glances** — each glance is a self-contained plugin that touches only its own folder.
+- **Modular glances** — each glance is a self-contained plugin that touches only its own folder. Twenty ship built in.
+- **Smart Panel** — a dynamic menu-bar layout that promotes only the glances signalling something worth your attention, and stays out of the way otherwise.
+- **Standalone tool windows** — pop any glance out of the popover into its own resizable window, sized to fit its content.
 - **Home Screen / Notification Center widgets** — via the bundled WidgetKit extension.
+- **AI Assistant glance** — a chat that can call your other glances as tools and trigger a refresh on demand.
 - **Secrets kept out of preferences** — secrets go through a dedicated `CredentialStore`, which keeps them in a `0600` file in Application Support, never `UserDefaults`. This guards against other users on the machine, not against code running as you; `CredentialStore.swift` documents the trade-off.
 - **Independent refresh** — every glance sets its own refresh interval; a shared coordinator handles the rest.
-- **Per-glance settings** — configure each glance from a unified Settings window.
+- **Per-glance settings** — configure each glance from a unified Settings window, organized by category.
 
 ## Built-in glances
 
+Glances are grouped into categories in Settings.
+
+### System
+
 | Glance | What it shows |
 | --- | --- |
-| Weather | Current conditions for your location |
-| Stocks | Live quotes for tickers you follow |
-| GitHub | Your recent GitHub activity |
-| Photos | A rotating look at your library |
-| System | CPU, memory, and other system stats |
-| Time & Productivity | World clocks, your next event, reminders, a countdown |
+| Mac Health | CPU, memory, disk, throughput, and other system stats |
+| Power | Battery health %, cycle count, temperature, adapter wattage, and a charge-history sparkline |
+| Network | Reachability/latency probes against your own list of hosts, plus VPN and throughput |
+
+### Productivity
+
+| Glance | What it shows |
+| --- | --- |
+| Notes | A quick-capture field and a list of everything you've saved — local and private |
+| Habits | Daily habits with completion streaks |
 | Pomodoro | Focus/break cycles with long breaks and a session tally |
+| Time & Productivity | World clocks, your next event, reminders, a countdown |
+| Timers | Multiple concurrent countdown timers plus a stopwatch |
+| Next Meeting | A live countdown ring, one-click Join, and today's remaining agenda |
+
+### Finance
+
+| Glance | What it shows |
+| --- | --- |
+| Stocks | Live quotes for tickers you follow |
+| Currency | A base currency tracked against a list of targets |
+
+### Developer
+
+| Glance | What it shows |
+| --- | --- |
+| GitHub | Your recent GitHub activity |
 | Colors | Eyedrop any pixel, dial in a shade, keep favorites |
 | Custom API | Point a glance at any JSON endpoint |
+
+### Utilities
+
+| Glance | What it shows |
+| --- | --- |
+| Assistant | A chat that can call your other glances as tools |
+| Weather | Current conditions for your location |
+| Photos | A rotating look at your library |
+| World Clock | Live-ticking clocks with day/night and GMT offsets |
+| Feeds | RSS/Atom feeds merged with the Hacker News front page into one reading list |
+| Clipboard | A searchable history of recent clipboard entries |
 
 ## Install
 
@@ -131,25 +169,31 @@ Glances are plugins that conform to the `GlancePlugin` protocol. Each is a `@Mai
 ```swift
 @MainActor
 protocol GlancePlugin: AnyObject {
-    var id: String { get }                     // stable, unique, lowercase
-    var title: String { get }                  // shown in Settings + popover
-    var iconSystemName: String { get }         // SF Symbol
-    var refreshInterval: TimeInterval { get }  // seconds; 0 = refresh once on start
-    func refresh() async                       // fetch/recompute; never throws
-    func popoverSection() -> AnyView           // rich popover content
-    func settingsSection() -> AnyView          // per-glance settings (optional)
+    var id: String { get }                        // stable, unique, lowercase — the persistence key
+    var title: String { get }                     // shown in Settings + popover
+    var iconSystemName: String { get }            // SF Symbol
+    var category: GlanceCategory { get }           // Settings grouping (has a default)
+    var refreshInterval: TimeInterval { get }     // seconds; 0 = opt out of the shared refresh loop
+    func refresh() async                          // fetch/recompute; never throws
+    var requiredPermissions: [GlancePermission] { get }  // shown as a grant prompt (default: none)
+    func currentSignal() -> GlanceSignal?         // relevance for the Smart Panel (default: nil)
+    func popoverSection() -> AnyView              // rich popover content
+    func settingsSection() -> AnyView             // per-glance settings (default: empty)
+    var preferredToolWindowSize: CGSize? { get }  // standalone-window size (default: automatic)
+    var fillsToolWindow: Bool { get }             // manage own layout in the tool window (default: false)
 }
 ```
 
-The **Stocks** plugin is the worked reference. See [`Glancekit/Core/PLUGIN_CONTRACT.md`](Glancekit/Core/PLUGIN_CONTRACT.md) for the full contract and rules.
+Most requirements have defaults, so a minimal glance implements only `id`, `title`, `iconSystemName`, `refresh()`, and `popoverSection()`. The **Stocks** plugin is the worked reference. See [`Glancekit/Core/PLUGIN_CONTRACT.md`](Glancekit/Core/PLUGIN_CONTRACT.md) for the full contract and rules.
 
 ## Project layout
 
 ```
 Glancekit/
-  Core/        Plugin framework, registry, networking, credential store
+  Core/        Plugin framework, registry, refresh coordinator, Smart Panel signals,
+               networking, credential store, hotkeys, update checker
   Plugins/     Built-in glances (one folder each)
-  UI/          Menu bar, popover, onboarding
+  UI/          Menu bar, popover, Smart Panel, tool windows, onboarding, tutorial
   Settings/    Settings window
 GlancekitWidgets/   WidgetKit extension
 scripts/
