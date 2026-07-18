@@ -31,6 +31,26 @@ Glancekit lives in your menu bar and surfaces at-a-glance information from a gro
 
 ## Install
 
+### One-line install (recommended)
+
+Download and install the latest release straight to `/Applications` — no clone,
+no Xcode, no build:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/casualattitude0/glancekit/main/scripts/install-release.sh | bash
+```
+
+Pin a specific version with `GLANCEKIT_VERSION`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/casualattitude0/glancekit/main/scripts/install-release.sh | GLANCEKIT_VERSION=v1.0.2 bash
+```
+
+The script downloads the latest release `.zip`, installs it **in place** (so
+widgets you have already placed keep their settings), strips the download
+quarantine so Gatekeeper won't block the ad-hoc-signed app, refreshes the widget
+daemon, and launches Glancekit. macOS only.
+
 ### From the `.dmg`
 
 1. Download `Glancekit.dmg` and open it.
@@ -133,7 +153,8 @@ Glancekit/
   Settings/    Settings window
 GlancekitWidgets/   WidgetKit extension
 scripts/
-  install.sh        Build & install straight to /Applications (dev helper)
+  install-release.sh  Download the latest release & install to /Applications (curl | bash)
+  install.sh          Build & install straight to /Applications (dev helper)
 make-dmg.sh         Build & package a distributable .dmg
 ```
 
