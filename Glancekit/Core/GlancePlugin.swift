@@ -1,5 +1,48 @@
 import SwiftUI
 
+/// A coarse grouping used purely to organize glances in Settings: the sidebar
+/// lists each non-empty category as its own section. It has no bearing on the
+/// popover, the enabled/reorder state, or the Smart Panel — those all key off
+/// the plugin `id` and the registry order, and stay independent of category.
+///
+/// Case order here is the section order shown in Settings.
+enum GlanceCategory: String, CaseIterable, Comparable {
+    case system       = "System"
+    case productivity = "Productivity"
+    case finance      = "Finance"
+    case developer    = "Developer"
+    case utilities    = "Utilities"
+
+    /// Section header shown in Settings.
+    var title: String { rawValue }
+
+    static func < (lhs: GlanceCategory, rhs: GlanceCategory) -> Bool {
+        allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
+    }
+
+    /// The category a glance falls into by default, keyed by plugin `id`.
+    ///
+    /// Kept as one central map rather than scattered across twenty plugin files
+    /// so the whole taxonomy reads in one place — a glance that wants a
+    /// different home can still override `GlancePlugin.category`. Anything
+    /// unlisted (a new glance, the `id`-less case) lands in `.utilities`, the
+    /// catch-all, so it always shows up somewhere.
+    static func defaultCategory(forID id: String) -> GlanceCategory {
+        switch id {
+        case "system", "power", "network":
+            return .system
+        case "notes", "habits", "pomodoro", "timeprod", "timers", "nextmeeting":
+            return .productivity
+        case "stocks", "currency":
+            return .finance
+        case "github", "customapi", "colors":
+            return .developer
+        default:
+            return .utilities
+        }
+    }
+}
+
 /// The single contract every Glancekit tool ("glance") conforms to.
 ///
 /// A glance contributes a rich `popoverSection()` view, shown in the popover
@@ -20,6 +63,11 @@ protocol GlancePlugin: AnyObject {
 
     /// SF Symbol name used as the glance's icon.
     var iconSystemName: String { get }
+
+    /// Which Settings category this glance is grouped under. Organizational only
+    /// — see `GlanceCategory`. Defaults to `GlanceCategory.defaultCategory(forID:)`,
+    /// so most glances get their home from the central map and need not override.
+    var category: GlanceCategory { get }
 
     /// Desired auto-refresh cadence in seconds. Return 0 to opt out of the
     /// shared refresh loop (e.g. purely event-driven or on-demand glances).
@@ -61,6 +109,7 @@ protocol GlancePlugin: AnyObject {
 }
 
 extension GlancePlugin {
+    var category: GlanceCategory { GlanceCategory.defaultCategory(forID: id) }
     func currentSignal() -> GlanceSignal? { nil }
     func settingsSection() -> AnyView { AnyView(EmptyView()) }
     var refreshInterval: TimeInterval { 0 }

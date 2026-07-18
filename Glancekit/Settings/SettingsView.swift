@@ -111,23 +111,32 @@ struct SettingsView: View {
                     .tutorialAnchor(SettingsSection.quickSwitch)
             }
 
-            Section("Glances") {
-                // Enabled first, then disabled; alphabetical by title within each
-                // group — so the sidebar mirrors the enable grouping on the
-                // Glances page but reads in a predictable A–Z order. The
-                // Assistant is filtered out here — it lives in General above.
-                let byTitle: (any GlancePlugin, any GlancePlugin) -> Bool = {
-                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-                }
-                let sidebarPlugins = (registry.enabledPluginsInOrder.sorted(by: byTitle)
-                    + registry.disabledPluginsInOrder.sorted(by: byTitle))
-                    .filter { $0.id != Self.assistantPluginID }
-                ForEach(sidebarPlugins, id: \.id) { plugin in
-                    Label(plugin.title, systemImage: plugin.iconSystemName)
-                        // Dim the disabled ones: their settings stay reachable,
-                        // but the sidebar shows at a glance what's turned off.
-                        .foregroundStyle(registry.isEnabled(plugin.id) ? .primary : .secondary)
-                        .tag(plugin.id)
+            // One section per category, in `GlanceCategory` order, so the tools
+            // read as grouped families rather than one long list. Within a
+            // category: enabled first, then disabled, alphabetical by title in
+            // each group — mirroring the enable grouping on the Glances page but
+            // in a predictable A–Z order. Empty categories are dropped so a
+            // build with no finance glance shows no "Finance" header. The
+            // Assistant is filtered out — it lives in General above.
+            let byTitle: (any GlancePlugin, any GlancePlugin) -> Bool = {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+            let sidebarPlugins = (registry.enabledPluginsInOrder.sorted(by: byTitle)
+                + registry.disabledPluginsInOrder.sorted(by: byTitle))
+                .filter { $0.id != Self.assistantPluginID }
+            ForEach(GlanceCategory.allCases, id: \.self) { category in
+                let plugins = sidebarPlugins.filter { $0.category == category }
+                if !plugins.isEmpty {
+                    Section(category.title) {
+                        ForEach(plugins, id: \.id) { plugin in
+                            Label(plugin.title, systemImage: plugin.iconSystemName)
+                                // Dim the disabled ones: their settings stay
+                                // reachable, but the sidebar shows at a glance
+                                // what's turned off.
+                                .foregroundStyle(registry.isEnabled(plugin.id) ? .primary : .secondary)
+                                .tag(plugin.id)
+                        }
+                    }
                 }
             }
         }
