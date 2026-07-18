@@ -19,6 +19,11 @@ struct MenuBarLabelView: View {
                 // registers before any hotkey can fire.
                 SettingsWindowPresenter.registerOpenAction { openSettings() }
 
+                // Add the right-click Settings/Quit menu to the status item.
+                // Left-click still opens the popover — this only handles the
+                // right button, which SwiftUI leaves dead.
+                MenuBarPresenter.installRightClickMenu()
+
                 // The label is the one view MenuBarExtra builds at launch; the
                 // popover content stays unbuilt until the first click. Starting
                 // here is a deliberate call by the owner: glances refresh from

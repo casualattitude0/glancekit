@@ -19,8 +19,25 @@ protocol GlancePlugin: AnyObject {
 }
 ```
 
-Defaults exist for `refreshInterval` (0) and `settingsSection()` (empty) —
-override only what you need.
+Defaults exist for `refreshInterval` (0), `settingsSection()` (empty), and
+`currentSignal()` (nil) — override only what you need.
+
+### The Smart Panel signal (optional)
+
+The menu-bar panel has a dynamic layout — the **Smart Panel** — that surfaces
+only the glances that need attention right now, ranked by urgency. To take part,
+override:
+
+```swift
+func currentSignal() -> GlanceSignal?   // Core/GlanceSignal.swift; default nil
+```
+
+Compute it from the state you already hold after `refresh()` and return `nil`
+when there's nothing worth surfacing. Pick a `priority` (`ambient` < `normal` <
+`elevated` < `urgent`), a `score` (tiebreak within a priority), and a compact
+`headline`. Optional `detail`, `systemImage`, and `tint` refine the card. See
+`SystemStatsPlugin`/`StocksPlugin` for worked examples. Glances with nothing
+time-sensitive to say (e.g. Colors) just keep the `nil` default.
 
 ## Rules (non-negotiable)
 

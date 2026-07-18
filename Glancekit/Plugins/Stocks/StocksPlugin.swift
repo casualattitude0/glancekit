@@ -50,6 +50,32 @@ final class StocksPlugin: GlancePlugin {
         }
     }
 
+    /// Surfaces the watchlist's biggest mover with its intraday sparkline. A
+    /// large swing earns a higher priority; a flat day stays ambient. After the
+    /// close, a barely-moved ticker is suppressed entirely — a stale flat quote
+    /// overnight isn't worth a card.
+    func currentSignal() -> GlanceSignal? {
+        guard let mover = quotes.max(by: { abs($0.changePercent) < abs($1.changePercent) }) else {
+            return nil
+        }
+        let magnitude = abs(mover.changePercent)
+        // Context: after hours, only a genuine mover earns a slot.
+        if !marketProbablyOpen && magnitude < 2 { return nil }
+
+        let headline = String(format: "%@ %@%.2f%% · %.2f",
+                              mover.symbol, mover.isUp ? "+" : "−", magnitude, mover.price)
+        let tint: Color = mover.isUp ? .green : .red
+        let priority: GlanceSignal.Priority
+        if magnitude >= 5 { priority = .elevated }
+        else if magnitude >= 2 { priority = .normal }
+        else { priority = .ambient }
+        return GlanceSignal(priority: priority, score: magnitude,
+                            headline: headline,
+                            detail: marketProbablyOpen ? nil : "At last close",
+                            systemImage: iconSystemName, tint: tint,
+                            accessory: mover.series.count > 1 ? .sparkline(mover.series, up: mover.isUp) : .none)
+    }
+
     func popoverSection() -> AnyView {
         AnyView(StocksPopover(plugin: self))
     }

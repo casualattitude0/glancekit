@@ -91,6 +91,10 @@ struct AISettingsView: View {
             }
 
             statusLine
+
+            Divider()
+
+            MCPSettingsView()
         }
     }
 

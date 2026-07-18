@@ -264,10 +264,19 @@ private struct ToolWindowContent: View {
 
             Divider()
 
-            ScrollView {
+            // A glance that owns its own layout (e.g. the chat, which pins its
+            // composer to the bottom) fills the window; everything else scrolls
+            // to fit its intrinsic height.
+            if plugin.fillsToolWindow {
                 plugin.popoverSection()
                     .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    plugin.popoverSection()
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             Divider()

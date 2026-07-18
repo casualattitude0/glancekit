@@ -22,6 +22,9 @@ final class AIPlugin: GlancePlugin {
 
     init(registry: PluginRegistry, coordinator: RefreshCoordinator) {
         self.conversation = AIConversation(registry: registry, coordinator: coordinator)
+        // Bring up any configured MCP servers so their tools are ready when the
+        // user first chats. No-op when none are configured.
+        MCPStore.shared.connectEnabled()
     }
 
     func refresh() async {}
@@ -30,6 +33,10 @@ final class AIPlugin: GlancePlugin {
     /// enough for a run of messages plus the input row to breathe, and wide
     /// enough for readable bubbles. Comparable to Notes' 660×640 two-pane.
     var preferredToolWindowSize: CGSize? { CGSize(width: 460, height: 620) }
+
+    /// The chat owns its vertical layout — transcript fills, composer pins to the
+    /// bottom — so it fills the tool window instead of being scroll-wrapped.
+    var fillsToolWindow: Bool { true }
 
     func popoverSection() -> AnyView { AnyView(AIChatView(conversation: conversation)) }
     func settingsSection() -> AnyView { AnyView(AISettingsView()) }

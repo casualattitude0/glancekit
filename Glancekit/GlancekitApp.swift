@@ -8,6 +8,8 @@ struct GlancekitApp: App {
     @State private var hotkeys: HotkeyCenter
     @State private var quickSwitch: QuickSwitchStore
     @State private var tutorial: TutorialController
+    @State private var panelSettings = MenuPanelSettings()
+    @State private var panelHistory = SmartPanelHistory()
 
     init() {
         let registry = PluginRegistry()
@@ -28,6 +30,15 @@ struct GlancekitApp: App {
         registry.register(ColorsPlugin())
         registry.register(WeatherPlugin())
         registry.register(NotesPlugin())
+        registry.register(ClipboardPlugin())
+        registry.register(CurrencyPlugin())
+        registry.register(FeedsPlugin())
+        registry.register(TimersPlugin())
+        registry.register(HabitsPlugin())
+        registry.register(PowerPlugin())
+        registry.register(NetworkPlugin())
+        registry.register(WorldClockPlugin())
+        registry.register(NextMeetingPlugin())
         registry.register(AIPlugin(registry: registry, coordinator: coordinator))
         // ──────────────────────────────────────────────────────────────────
 
@@ -72,6 +83,8 @@ struct GlancekitApp: App {
             PopoverRootView()
                 .environment(registry)
                 .environment(coordinator)
+                .environment(panelSettings)
+                .environment(panelHistory)
                 .frame(width: 340)
         } label: {
             MenuBarLabelView()
@@ -88,6 +101,7 @@ struct GlancekitApp: App {
                 .environment(quickSwitch)
                 .environment(updater)
                 .environment(tutorial)
+                .environment(panelSettings)
         }
 
         // Standalone first-run window. Opened once on launch by MenuBarLabelView;

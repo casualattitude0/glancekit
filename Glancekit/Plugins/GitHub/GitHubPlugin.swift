@@ -121,6 +121,45 @@ final class GitHubPlugin: GlancePlugin {
         }
     }
 
+    /// Surfaces unread notifications and failing PR checks across all accounts.
+    /// A red CI dot is urgent; unread notifications alone are elevated.
+    func currentSignal() -> GlanceSignal? {
+        let unread = accountData.reduce(0) { $0 + $1.notifications.filter(\.unread).count }
+        let failing = accountData.reduce(0) { sum, data in
+            sum + data.ciStatus.values.filter { $0 == "failure" || $0 == "error" }.count
+        }
+        guard unread > 0 || failing > 0 else {
+            // Nothing pressing — but if accounts are configured and healthy, a
+            // quiet "all caught up" card keeps GitHub on the feed.
+            let openPRs = accountData.reduce(0) { $0 + $1.pullRequests.count }
+            guard !accountData.isEmpty, accountData.allSatisfy({ $0.error == nil }) else { return nil }
+            return GlanceSignal(priority: .ambient, score: 0,
+                                headline: openPRs > 0 ? "Inbox clear · \(openPRs) open PR\(openPRs == 1 ? "" : "s")" : "All caught up",
+                                systemImage: iconSystemName, tint: .secondary)
+        }
+
+        var parts: [String] = []
+        if unread > 0 { parts.append("\(unread) unread") }
+        if failing > 0 { parts.append("\(failing) CI failing") }
+
+        // Name the most recent unread thread, so the card says *what* is waiting
+        // rather than just how much — the API returns them newest-first.
+        let topUnread = accountData
+            .flatMap { $0.notifications }
+            .first { $0.unread }
+        let detail = topUnread.map { "\($0.subject.title) · \($0.repository.full_name)" }
+
+        let priority: GlanceSignal.Priority = failing > 0 ? .urgent : .elevated
+        let tint: Color = failing > 0 ? .red : .blue
+        // Rank by attention weight: a failing check counts for more than an
+        // unread thread, so a broken build outranks a big inbox.
+        let score = Double(failing * 10 + unread)
+        return GlanceSignal(priority: priority, score: score,
+                            headline: parts.joined(separator: " · "),
+                            detail: detail,
+                            systemImage: iconSystemName, tint: tint)
+    }
+
     func popoverSection() -> AnyView {
         AnyView(GitHubPopover(plugin: self))
     }

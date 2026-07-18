@@ -282,6 +282,8 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Glancekit shows your next event in the menu bar.";
+				INFOPLIST_KEY_NSLocationUsageDescription = "Glancekit uses your location to show local weather.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Glancekit uses your location to show local weather.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Glancekit displays photos from your library as a slideshow glance.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Glancekit shows your reminders in the menu bar.";
@@ -307,6 +309,8 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Glancekit shows your next event in the menu bar.";
+				INFOPLIST_KEY_NSLocationUsageDescription = "Glancekit uses your location to show local weather.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Glancekit uses your location to show local weather.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Glancekit displays photos from your library as a slideshow glance.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Glancekit shows your reminders in the menu bar.";

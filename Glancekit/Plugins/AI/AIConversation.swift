@@ -87,6 +87,7 @@ final class AIConversation {
     func clear() {
         task?.cancel()
         task = nil
+        AIApprovalGate.shared.cancelPending()
         messages.removeAll()
         lastError = nil
         isResponding = false
@@ -102,14 +103,14 @@ final class AIConversation {
             model: AIConfigStore.shared.model,
             systemPrompt: AIConfigStore.shared.systemPrompt)
 
-        let toolbox = AIToolbox(registry: registry, coordinator: coordinator)
+        let router = AIToolRouter(registry: registry, coordinator: coordinator, mcp: MCPStore.shared)
 
         var history = baseHistory(providerKind: config.providerKind)
         var assistantIndex: Int?
 
         do {
             for iteration in 0..<maxIterations {
-                let result = try await client.runTurn(config: config, history: history, tools: toolbox.specs)
+                let result = try await client.runTurn(config: config, history: history, tools: router.specs)
 
                 // No tool calls → this is the final prose answer.
                 if result.toolCalls.isEmpty {
@@ -132,9 +133,8 @@ final class AIConversation {
 
                 var results: [AIToolResult] = []
                 for call in result.toolCalls {
-                    let output = await toolbox.execute(call)
+                    let output = await runToolCall(call, router: router, at: &assistantIndex)
                     results.append(AIToolResult(callID: call.id, name: call.name, content: output))
-                    appendActivity(output, at: &assistantIndex)
                 }
                 history.append(.toolResults(results))
 
@@ -153,6 +153,39 @@ final class AIConversation {
                 messages.remove(at: index)
             }
         }
+    }
+
+    /// Run one tool call, gating it through the approval prompt first when the
+    /// router says it mutates state or reaches an external MCP server (unless the
+    /// user has already "always allowed" it). A denial still returns a result
+    /// string so the follow-up request stays well-formed for the provider.
+    private func runToolCall(_ call: AIToolCall, router: AIToolRouter, at index: inout Int?) async -> String {
+        if router.requiresApproval(call.name), !AIApprovalGate.shared.isAlwaysAllowed(call.name) {
+            let request = AIApprovalGate.Request(
+                toolName: call.name,
+                displayName: router.displayName(for: call.name),
+                argsSummary: Self.summarizeArguments(call.arguments),
+                isMCP: router.isMCP(call.name))
+            let decision = await AIApprovalGate.shared.request(request)
+            if decision == .deny {
+                appendActivity("Declined \(router.displayName(for: call.name))", at: &index)
+                return "The user declined to run this tool."
+            }
+        }
+        let output = await router.execute(call)
+        appendActivity(output, at: &index)
+        return output
+    }
+
+    /// A compact, truncated rendering of a call's arguments for the prompt.
+    private static func summarizeArguments(_ args: [String: Any]) -> String {
+        guard !args.isEmpty else { return "no arguments" }
+        if JSONSerialization.isValidJSONObject(args),
+           let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]),
+           let string = String(data: data, encoding: .utf8) {
+            return string.count > 200 ? String(string.prefix(200)) + "…" : string
+        }
+        return "\(args)"
     }
 
     // MARK: - History reconstruction

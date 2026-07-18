@@ -40,7 +40,17 @@ enum AIChatError: Error, LocalizedError {
             return "The AI assistant isn't configured yet. Add an API key and model in Settings."
         case .http(let code, let body):
             let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? "HTTP \(code)" : "HTTP \(code): \(trimmed)"
+            switch code {
+            case 401, 403:
+                let base = "Authentication failed (HTTP \(code)). Check your API key in Settings."
+                return trimmed.isEmpty ? base : "\(base) \(trimmed)"
+            case 429:
+                let base = "Rate limit or quota exceeded (HTTP 429)."
+                let hint = "Wait and try again, or switch to a lighter model or another provider in Settings."
+                return trimmed.isEmpty ? "\(base) \(hint)" : "\(base) \(trimmed)"
+            default:
+                return trimmed.isEmpty ? "HTTP \(code)" : "HTTP \(code): \(trimmed)"
+            }
         case .decoding(let detail):
             return "Couldn't read the model's response: \(detail)"
         case .noContent:
@@ -147,8 +157,7 @@ struct AIClient {
         }
 
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let bodyString = String(data: data, encoding: .utf8) ?? ""
-            throw AIChatError.http(http.statusCode, bodyString)
+            throw AIChatError.http(http.statusCode, Self.extractErrorMessage(from: data))
         }
 
         let json: Any
@@ -335,6 +344,25 @@ struct AIClient {
         return AITurnResult(assistantText: assistantText,
                             toolCalls: toolCalls,
                             rawAssistantMessage: message)
+    }
+
+    /// Pull a concise, human message out of an error response body rather than
+    /// surfacing the raw JSON. Both providers nest the message at `error.message`
+    /// (Anthropic, OpenAI, and Google's OpenAI-compatible endpoint all do); fall
+    /// back to `error.status`, a top-level `message`, or a trimmed+truncated raw
+    /// body so nothing is silently lost — but the whole payload (quota `details`,
+    /// `violations`, …) never lands in the chat.
+    private static func extractErrorMessage(from data: Data) -> String {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = json["error"] as? [String: Any] {
+                if let message = error["message"] as? String, !message.isEmpty { return message }
+                if let status = error["status"] as? String, !status.isEmpty { return status }
+            }
+            if let error = json["error"] as? String, !error.isEmpty { return error }
+            if let message = json["message"] as? String, !message.isEmpty { return message }
+        }
+        let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.count > 300 ? String(raw.prefix(300)) + "…" : raw
     }
 
     /// OpenAI ships tool-call arguments as a JSON *string*; decode defensively so
