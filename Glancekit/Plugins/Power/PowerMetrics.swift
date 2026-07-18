@@ -46,6 +46,29 @@ enum PowerMetrics {
         // From IOPSCopyExternalPowerAdapterDetails
         var adapterWatts: Int?
 
+        // Instantaneous electrical readings (AppleSmartBattery).
+        /// Signed battery current in milliamps: negative while discharging,
+        /// positive while charging. `nil` when the key is absent/implausible.
+        var amperageMA: Int?
+        /// Battery terminal voltage in millivolts. `nil` when absent.
+        var voltageMV: Int?
+
+        /// Instantaneous power in watts (|Amperage| × Voltage), signed the same
+        /// way as `amperageMA`: negative = draining, positive = charging. `nil`
+        /// unless both amperage and voltage are available.
+        var powerWatts: Double? {
+            guard let mA = amperageMA, let mV = voltageMV else { return nil }
+            return (Double(mA) / 1000.0) * (Double(mV) / 1000.0)
+        }
+
+        /// Present full-charge capacity in mAh (AppleRawMaxCapacity / MaxCapacity)
+        /// — only surfaced when it looks like a real mAh figure rather than a
+        /// legacy percentage. `nil` otherwise.
+        var fullChargeCapacityMAh: Int? {
+            guard let m = maxCapacity, m > 500 else { return nil }
+            return m
+        }
+
         /// Health is considered degraded when the OS flags a non-normal
         /// condition, a permanent failure, or health drops below 80%.
         var healthIsDegraded: Bool {
@@ -163,6 +186,17 @@ enum PowerMetrics {
             snap.temperatureC = convertTemperature(raw)
         }
 
+        // Instantaneous current (signed) and terminal voltage. Both are
+        // best-effort: absent or implausible values simply stay nil.
+        if let rawAmp = props["Amperage"] as? Int {
+            snap.amperageMA = normalizedAmperage(rawAmp)
+        } else if let rawAmp = props["InstantAmperage"] as? Int {
+            snap.amperageMA = normalizedAmperage(rawAmp)
+        }
+        if let mV = props["Voltage"] as? Int, mV > 0, mV < 30000 {
+            snap.voltageMV = mV
+        }
+
         if let condition = props["BatteryHealthCondition"] as? String, !condition.isEmpty {
             snap.condition = condition
         } else if let serviceFlag = props["PermanentFailureStatus"] as? Int, serviceFlag != 0 {
@@ -186,6 +220,16 @@ enum PowerMetrics {
         let asKelvin = Double(raw) / 10.0 - 273.15
         if asKelvin > -20 && asKelvin < 120 { return asKelvin }
         return nil
+    }
+
+    /// AppleSmartBattery's `Amperage` is a signed current, but some machines
+    /// surface it as an unsigned value that has wrapped past 2^31. Fold it back
+    /// into a signed range and reject anything outside a plausible ±30 A band.
+    private static func normalizedAmperage(_ raw: Int) -> Int? {
+        var v = raw
+        if v > Int(Int32.max) { v -= Int(UInt32.max) + 1 }
+        guard abs(v) <= 30000 else { return nil }
+        return v
     }
 
     // MARK: - Power adapter
