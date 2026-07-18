@@ -29,7 +29,7 @@ struct ShortcutsSettingsView: View {
     }
 
     private var appRows: [ShortcutRowInfo] {
-        [ShortcutAction.quickSwitch, .settings].compactMap { action in
+        [ShortcutAction.quickSwitch, .settings, .openMenubar].compactMap { action in
             action.appDisplay.map { display in
                 ShortcutRowInfo(
                     action: action,

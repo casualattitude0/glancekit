@@ -45,6 +45,8 @@ struct GlancekitApp: App {
                     ToolWindowManager.shared.quickSwitch(among: quickSwitch.ring(in: registry))
                 case .settings:
                     SettingsWindowPresenter.toggle()
+                case .openMenubar:
+                    MenuBarPresenter.toggle()
                 case .glance(let pluginID):
                     guard let plugin = registry.plugin(id: pluginID) else { return }
                     ToolWindowManager.shared.toggle(plugin: plugin)

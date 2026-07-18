@@ -14,6 +14,8 @@ import Observation
 enum ShortcutAction: Hashable, Identifiable {
     case quickSwitch
     case settings
+    /// Opens (or closes) the menu-bar popover from anywhere.
+    case openMenubar
     /// Opens the glance with this `GlancePlugin.id` in its tool window.
     case glance(pluginID: String)
 
@@ -26,6 +28,7 @@ enum ShortcutAction: Hashable, Identifiable {
         switch self {
         case .quickSwitch: "quickswitch"
         case .settings: "settings"
+        case .openMenubar: "openmenubar"
         case .glance(let pluginID): pluginID
         }
     }
@@ -34,7 +37,7 @@ enum ShortcutAction: Hashable, Identifiable {
     /// single glance.
     var pluginID: String? {
         switch self {
-        case .quickSwitch, .settings: nil
+        case .quickSwitch, .settings, .openMenubar: nil
         case .glance(let pluginID): pluginID
         }
     }
@@ -48,6 +51,8 @@ enum ShortcutAction: Hashable, Identifiable {
             GlobalShortcut(keyCode: UInt16(kVK_Tab), modifiers: [.option])
         case .settings:
             GlobalShortcut(keyCode: UInt16(kVK_ANSI_Grave), modifiers: [.option])
+        case .openMenubar:
+            GlobalShortcut(keyCode: UInt16(kVK_ANSI_M), modifiers: [.option])
         case .glance(let pluginID):
             Self.defaultGlanceShortcuts[pluginID]
         }
@@ -68,6 +73,8 @@ enum ShortcutAction: Hashable, Identifiable {
             ("Quick Switch", "Steps through the glances chosen on the Quick Switch page.", "rectangle.stack")
         case .settings:
             ("Open Settings", "Opens this window from any app. Press again, or ⎋, to close it.", "gearshape")
+        case .openMenubar:
+            ("Open Menu Bar", "Drops the menu-bar popover open from any app. Press again to close it.", "menubar.arrow.down.rectangle")
         case .glance:
             nil
         }
@@ -120,7 +127,7 @@ final class HotkeyCenter {
     ///   order the Shortcuts page should list them (normally `registry.plugins`).
     init(glancePluginIDs: [String], defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.allActions = [.quickSwitch, .settings] + glancePluginIDs.map { .glance(pluginID: $0) }
+        self.allActions = [.quickSwitch, .settings, .openMenubar] + glancePluginIDs.map { .glance(pluginID: $0) }
         bindings = Self.loadBindings(actions: allActions, from: defaults)
     }
 
