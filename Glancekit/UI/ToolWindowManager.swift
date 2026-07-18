@@ -307,6 +307,19 @@ final class ToolWindowManager {
         return window
     }
 
+    /// Whether `candidate` is one of our tool windows, or a sheet/child window
+    /// attached to one (directly or up an ancestry chain). A SwiftUI `.sheet`
+    /// presents a separate window whose `sheetParent`/`parent` is the tool window
+    /// that raised it, so taking key to it must not read as an outside click.
+    private func isOwnedWindow(_ candidate: NSWindow) -> Bool {
+        var w: NSWindow? = candidate
+        while let current = w {
+            if windows.values.contains(where: { $0 === current }) { return true }
+            w = current.sheetParent ?? current.parent
+        }
+        return false
+    }
+
     private func handleResignKey(pluginID: String) {
         guard !isAutoCloseSuspended else { return }
 
@@ -321,8 +334,13 @@ final class ToolWindowManager {
                 guard let window = self.windows[pluginID], window.isVisible else { return }
                 guard !window.isKeyWindow else { return } // regained focus
 
-                // Clicking from one tool window to another isn't "outside".
-                if let key = NSApp.keyWindow, self.windows.values.contains(where: { $0 === key }) {
+                // Clicking from one tool window to another isn't "outside" — and
+                // neither is a sheet a glance itself put up (an editor, a detail,
+                // a confirmation). A SwiftUI `.sheet` opens its own window that
+                // takes key from ours; it's a child/sheet of the tool window, not
+                // an outside click, so closing here would tear the sheet down the
+                // instant it appeared.
+                if let key = NSApp.keyWindow, self.isOwnedWindow(key) {
                     return
                 }
                 window.close()
