@@ -62,7 +62,14 @@ struct SettingsView: View {
             }
 
             Section("Glances") {
-                ForEach(registry.orderedPlugins, id: \.id) { plugin in
+                // Enabled first, then disabled; alphabetical by title within each
+                // group — so the sidebar mirrors the enable grouping on the
+                // Glances page but reads in a predictable A–Z order.
+                let byTitle: (any GlancePlugin, any GlancePlugin) -> Bool = {
+                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                ForEach(registry.enabledPluginsInOrder.sorted(by: byTitle)
+                    + registry.disabledPluginsInOrder.sorted(by: byTitle), id: \.id) { plugin in
                     Label(plugin.title, systemImage: plugin.iconSystemName)
                         // Dim the disabled ones: their settings stay reachable,
                         // but the sidebar shows at a glance what's turned off.
