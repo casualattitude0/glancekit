@@ -48,16 +48,40 @@ final class ToolWindowManager {
     /// suspend/resume paths, all keyed by id, treat it like any other tool window.
     private static let quickSwitchWindowID = "__glancekit.quickswitch__"
 
-    /// One size for every tool in the Quick Switch window — the whole point of the
-    /// unified window is that switching never resizes it. Content scrolls to fit.
-    private static let quickSwitchWindowSize = CGSize(width: 440, height: 600)
+    /// The default tool-window size, matched to `makeWindow(for:)` — used when a
+    /// glance states no preferred size.
+    private static let defaultToolWindowSize = CGSize(width: 360, height: 520)
+
+    /// Extra height for the Quick Switch nav bar, which the single-glance window
+    /// has no equivalent of — so the body still gets the exact room it has in the
+    /// tool's own window rather than losing the nav bar's strip to it.
+    private static let quickSwitchNavBarHeight: CGFloat = 44
+
+    /// The Quick Switch window follows the *selected* tool's own window in
+    /// everything, size included: the tool's preferred size (its single-window
+    /// size) plus the nav bar strip. So switching resizes the window to match
+    /// whichever glance is on screen — a width-responsive glance (Colors' two-pane,
+    /// Notes') always gets the width its own window would give it, and never
+    /// collapses to a different, narrower version.
+    private func quickSwitchWindowSize(for plugin: any GlancePlugin) -> CGSize {
+        let base = plugin.preferredToolWindowSize ?? Self.defaultToolWindowSize
+        return CGSize(width: base.width, height: base.height + Self.quickSwitchNavBarHeight)
+    }
 
     /// Nesting depth of `suspendAutoClose()` calls. A count rather than a flag
     /// so overlapping suspensions (two windows sampling in sequence) can't have
     /// the first one to finish re-arm auto-close under the other.
     private var autoCloseSuspensions = 0
 
-    private init() {}
+    private init() {
+        // Resize the window to the newly-selected tool whenever the selection
+        // changes — whether from a nav-bar click (the view sets `selectedID`) or
+        // the shortcut (`advance()`), both routed through the model — so the
+        // window always matches that tool's own single-window size.
+        quickSwitchModel.onSelectionChange = { [weak self] in
+            self?.fitQuickSwitchWindowToSelection()
+        }
+    }
 
     var isAutoCloseSuspended: Bool { autoCloseSuspensions > 0 }
 
@@ -85,15 +109,22 @@ final class ToolWindowManager {
     /// step. With it down, it reopens on the tool last shown (the model keeps the
     /// selection across closes), falling back to the first when that glance has
     /// dropped out of the ring.
-    func quickSwitch(among plugins: [any GlancePlugin]) {
-        guard !plugins.isEmpty else { return }
+    func quickSwitch(
+        among plugins: [any GlancePlugin],
+        assistant: (any GlancePlugin)? = nil,
+        shortcut: String? = nil
+    ) {
+        guard !(plugins.isEmpty && assistant == nil) else { return }
         // Same reasoning as `toggle`: an eyedrop in progress owns the screen, and
         // swapping the window's body underneath it would discard the pick.
         guard !isAutoCloseSuspended else { return }
 
-        quickSwitchModel.setRing(plugins)
+        quickSwitchModel.configure(ring: plugins, assistant: assistant)
+        quickSwitchModel.switchShortcut = shortcut
 
         if let window = windows[Self.quickSwitchWindowID], window.isVisible {
+            // `advance()` resizes the window to the new tool via the selection
+            // callback; just bring it back to front.
             quickSwitchModel.advance()
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
@@ -104,16 +135,33 @@ final class ToolWindowManager {
     }
 
     /// Brings the unified Quick Switch window to front at the mouse, creating it
-    /// on first use. The selection is already set on `quickSwitchModel`.
+    /// on first use and sizing it to the selected tool. The selection is already
+    /// set on `quickSwitchModel`.
     private func showQuickSwitchWindow() {
         let id = Self.quickSwitchWindowID
-        let window = windows[id] ?? makeQuickSwitchWindow()
+        let size = quickSwitchModel.current.map { quickSwitchWindowSize(for: $0) }
+            ?? Self.defaultToolWindowSize
+        let window = windows[id] ?? makeQuickSwitchWindow(size: size)
         windows[id] = window
         lastShownPluginID = id
 
+        window.setContentSize(size)
         window.setFrameOrigin(originNearMouse(for: window.frame.size))
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Resizes the open Quick Switch window to the selected tool's own window
+    /// size, keeping the top-left corner fixed so it grows/shrinks downward rather
+    /// than jumping (NSWindow otherwise pins the bottom-left on a resize).
+    private func fitQuickSwitchWindowToSelection() {
+        guard let window = windows[Self.quickSwitchWindowID], window.isVisible,
+              let plugin = quickSwitchModel.current else { return }
+
+        let size = quickSwitchWindowSize(for: plugin)
+        let topLeft = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        window.setContentSize(size)
+        window.setFrameTopLeftPoint(topLeft)
     }
 
     /// Brings the given glance's tool window to front at the current mouse
@@ -183,9 +231,8 @@ final class ToolWindowManager {
         }
     }
 
-    private func makeQuickSwitchWindow() -> NSWindow {
+    private func makeQuickSwitchWindow(size: CGSize) -> NSWindow {
         let id = Self.quickSwitchWindowID
-        let size = Self.quickSwitchWindowSize
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
@@ -298,12 +345,15 @@ private final class ToolWindowDelegate: NSObject, NSWindowDelegate {
     }
 }
 
-/// Chrome around a glance's popover section: a title row, a scrolling body, and
-/// an explicit Close button.
-private struct ToolWindowContent: View {
+/// One glance rendered exactly as it appears in its own tool window: a title
+/// row, a divider, and the scrolling (or window-filling) `popoverSection()`.
+///
+/// Shared by the single-glance tool window (`ToolWindowContent`) and the unified
+/// Quick Switch window, so a glance looks identical whichever way it's opened —
+/// the Quick Switch window just stacks its nav bar above this and its Close row
+/// below. Kept internal (not `private`) so `QuickSwitchWindow.swift` can reuse it.
+struct ToolGlanceSection: View {
     let plugin: any GlancePlugin
-    var contentSize: CGSize = CGSize(width: 360, height: 520)
-    let onClose: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -331,6 +381,20 @@ private struct ToolWindowContent: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+}
+
+/// Chrome around a glance's popover section: the shared glance section above an
+/// explicit Close button.
+private struct ToolWindowContent: View {
+    let plugin: any GlancePlugin
+    var contentSize: CGSize = CGSize(width: 360, height: 520)
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ToolGlanceSection(plugin: plugin)
 
             Divider()
 

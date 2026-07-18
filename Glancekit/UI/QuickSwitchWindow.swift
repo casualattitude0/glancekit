@@ -26,37 +26,104 @@ import SwiftUI
 @Observable
 final class QuickSwitchModel {
     private(set) var ring: [any GlancePlugin] = []
-    var selectedID: String?
 
-    /// The glance currently shown, falling back to the first in the ring.
-    var current: (any GlancePlugin)? {
-        if let selectedID, let hit = ring.first(where: { $0.id == selectedID }) { return hit }
-        return ring.first
-    }
-
-    /// Point the window at `plugins`, keeping the current selection when it's
-    /// still in the ring and otherwise falling back to the first. Called on every
-    /// Quick Switch press, so reconfiguring the ring in Settings takes effect at
-    /// once — a glance dropped from the ring can't stay selected.
-    func setRing(_ plugins: [any GlancePlugin]) {
-        ring = plugins
-        if selectedID == nil || !plugins.contains(where: { $0.id == selectedID }) {
-            selectedID = plugins.first?.id
+    var selectedID: String? {
+        didSet {
+            guard oldValue != selectedID else { return }
+            onSelectionChange?()
         }
     }
 
-    func select(_ id: String) { selectedID = id }
+    /// Fired when the on-screen tool changes — from a nav-bar click or from
+    /// `advance()` — so `ToolWindowManager` can resize the window to that tool's
+    /// own single-window size. `@ObservationIgnored`: it's plumbing, not view
+    /// state, and must not itself invalidate the SwiftUI body.
+    @ObservationIgnored var onSelectionChange: (() -> Void)?
+
+    /// The AI Assistant, pinned separately from the ring so it's reachable from
+    /// any tool regardless of ring configuration — the "get help, then get back"
+    /// affordance. Kept out of `ring` (see `configure`) so it never doubles as a
+    /// ring tab.
+    private(set) var assistant: (any GlancePlugin)?
+
+    /// The tool to return to when leaving the Assistant: whatever was on screen
+    /// when it was summoned. Lets a detour to the Assistant snap straight back to
+    /// the original tool. `nil` once consumed or when navigating the ring directly.
+    private(set) var originID: String?
+
+    /// The user's configured Quick Switch shortcut, as a display string (e.g.
+    /// "⌥⇥"), shown in the footer so the hint always names the real key rather
+    /// than a hardcoded guess. `nil` when the shortcut is unbound.
+    var switchShortcut: String?
+
+    /// The glance currently shown — a ring tool or the pinned Assistant — falling
+    /// back to the first ring tool.
+    var current: (any GlancePlugin)? {
+        if let selectedID {
+            if let hit = ring.first(where: { $0.id == selectedID }) { return hit }
+            if let assistant, assistant.id == selectedID { return assistant }
+        }
+        return ring.first
+    }
+
+    /// Whether the Assistant is the tool on screen.
+    var isShowingAssistant: Bool { assistant.map { $0.id == selectedID } ?? false }
+
+    /// The title of the tool a Back button would return to, if any.
+    var originTitle: String? {
+        originID.flatMap { id in ring.first { $0.id == id }?.title }
+    }
+
+    /// Point the window at the ring plus the pinned Assistant, keeping the current
+    /// selection when it's still valid and otherwise falling back to the first
+    /// ring tool. Called on every Quick Switch press, so reconfiguring the ring in
+    /// Settings takes effect at once.
+    func configure(ring: [any GlancePlugin], assistant: (any GlancePlugin)?) {
+        // Dedupe the Assistant out of the ring: it's pinned on its own, so letting
+        // it also be a ring tab would show it twice.
+        self.ring = ring.filter { $0.id != assistant?.id }
+        self.assistant = assistant
+
+        var valid = Set(self.ring.map(\.id))
+        if let assistant { valid.insert(assistant.id) }
+        if selectedID == nil || !(selectedID.map(valid.contains) ?? false) {
+            selectedID = self.ring.first?.id ?? assistant?.id
+        }
+    }
+
+    /// Select a ring tool directly (a nav-bar click). Clears any pending Back —
+    /// navigating the ring by hand ends the Assistant detour.
+    func select(_ id: String) {
+        originID = nil
+        selectedID = id
+    }
+
+    /// Jump to the Assistant, remembering the current tool so `returnToOrigin()`
+    /// can come straight back. A no-op detail: re-summoning while already on the
+    /// Assistant keeps the original origin rather than losing it.
+    func showAssistant() {
+        guard let assistant, selectedID != assistant.id else { return }
+        originID = selectedID
+        selectedID = assistant.id
+    }
+
+    /// Return from the Assistant to the tool it was summoned from, falling back to
+    /// the first ring tool when that origin is gone.
+    func returnToOrigin() {
+        let target = originID.flatMap { id in ring.first { $0.id == id }?.id } ?? ring.first?.id
+        originID = nil
+        selectedID = target
+    }
 
     /// Step to the next tool, wrapping — what the shortcut does with the window up.
-    func advance() { step(by: 1) }
-
-    /// Step to the previous tool, wrapping — the in-window back accelerator.
-    func retreat() { step(by: -1) }
-
-    private func step(by delta: Int) {
+    /// On the Assistant it instead snaps back to where you were, so the same key
+    /// that cycles the ring also gets you out of an Assistant detour.
+    func advance() {
+        if isShowingAssistant { returnToOrigin(); return }
         guard !ring.isEmpty else { return }
+        originID = nil
         let index = selectedID.flatMap { id in ring.firstIndex { $0.id == id } } ?? 0
-        selectedID = ring[(index + delta + ring.count) % ring.count].id
+        selectedID = ring[(index + 1) % ring.count].id
     }
 }
 
@@ -83,10 +150,33 @@ struct QuickSwitchWindowContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// A horizontal, scrolling strip of every glance in the ring. The selected
-    /// tab is tinted, and it scrolls itself into view when the shortcut advances
-    /// past the visible edge so the current tool is always on screen.
+    /// The nav bar: an optional Back button (shown on the Assistant, to snap back
+    /// to the tool it was summoned from), the scrolling ring tabs, and the pinned
+    /// Assistant on the trailing edge — always reachable, kept outside the scroll
+    /// so it never slides off no matter how many glances are in the ring.
     private var navBar: some View {
+        HStack(spacing: 8) {
+            if model.isShowingAssistant, let origin = model.originTitle {
+                backButton(to: origin)
+            }
+
+            ringTabs
+
+            if let assistant = model.assistant {
+                Divider().frame(height: 22)
+                QuickSwitchTab(plugin: assistant, isSelected: model.isShowingAssistant) {
+                    model.showAssistant()
+                }
+                .help("Ask the Assistant, then jump back")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    /// The scrolling strip of ring tabs. The selected tab is tinted, and it
+    /// scrolls itself into view when the shortcut advances past the visible edge.
+    private var ringTabs: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -97,39 +187,41 @@ struct QuickSwitchWindowContent: View {
                         .id(plugin.id)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
             }
             .onChange(of: model.selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Snaps back from the Assistant to the tool it was opened from.
+    private func backButton(to title: String) -> some View {
+        Button(action: model.returnToOrigin) {
+            Label("Back to \(title)", systemImage: "chevron.left")
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help("Return to \(title)")
     }
 
     @ViewBuilder
     private var content: some View {
         if let plugin = model.current {
-            Group {
-                // A glance that owns its own vertical layout fills the window;
-                // everything else scrolls to fit — same contract the old per-glance
-                // tool window honored via `fillsToolWindow`.
-                if plugin.fillsToolWindow {
-                    plugin.popoverSection()
-                        .padding(16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                } else {
-                    ScrollView {
-                        plugin.popoverSection()
-                            .padding(16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-            // Rebuild the body on every switch: transient view state (a half-open
-            // picker, scroll offset) resets per tool, while the glance's real
-            // state lives in its @Observable plugin object and persists.
-            .id(plugin.id)
+            // The very same section a glance shows in its own tool window — title
+            // row, divider, scrolling body — so switching tools here is identical
+            // to opening each on its own, only without the window swap.
+            ToolGlanceSection(plugin: plugin)
+                // Rebuild on every switch: transient view state (a half-open
+                // picker, scroll offset) resets per tool, while the glance's real
+                // state lives in its @Observable plugin object and persists.
+                .id(plugin.id)
         } else {
             // The ring emptied out from under us (every glance excluded/disabled).
             ContentUnavailableView(
@@ -143,7 +235,10 @@ struct QuickSwitchWindowContent: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Text("⇧⌘[  /  ⇧⌘]  to switch")
+            // Names the user's real Quick Switch shortcut (which fires globally,
+            // so it advances the ring even while this window is focused), not a
+            // hardcoded key. Falls back to a pointer to Settings when unbound.
+            Text(hint)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
@@ -153,21 +248,20 @@ struct QuickSwitchWindowContent: View {
                 .keyboardShortcut(.cancelAction)
         }
         .padding(12)
-        // Safari-style next/prev-tab accelerators, kept out of the layout. Using
-        // ⇧⌘[ / ⇧⌘] rather than bare arrows so switching never steals the arrow
-        // keys from a glance's own text field (e.g. the Notes editor).
-        .background(accelerators)
     }
 
-    private var accelerators: some View {
-        ZStack {
-            Button("", action: model.advance)
-                .keyboardShortcut("]", modifiers: [.command, .shift])
-            Button("", action: model.retreat)
-                .keyboardShortcut("[", modifiers: [.command, .shift])
+    private var hint: String {
+        // On the Assistant, point at the way back to the tool you came from.
+        if model.isShowingAssistant, let origin = model.originTitle {
+            if let shortcut = model.switchShortcut {
+                return "\(shortcut) or Back to return to \(origin)"
+            }
+            return "Click Back to return to \(origin)"
         }
-        .opacity(0)
-        .accessibilityHidden(true)
+        if let shortcut = model.switchShortcut {
+            return "\(shortcut) or click a tab to switch"
+        }
+        return "Click a tab to switch — set a shortcut in Settings → Shortcuts"
     }
 }
 
