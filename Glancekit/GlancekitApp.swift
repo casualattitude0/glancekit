@@ -7,6 +7,7 @@ struct GlancekitApp: App {
     @State private var updater = UpdateChecker()
     @State private var hotkeys: HotkeyCenter
     @State private var quickSwitch: QuickSwitchStore
+    @State private var tutorial: TutorialController
 
     init() {
         let registry = PluginRegistry()
@@ -59,6 +60,7 @@ struct GlancekitApp: App {
         _coordinator = State(initialValue: RefreshCoordinator(registry: registry))
         _hotkeys = State(initialValue: hotkeys)
         _quickSwitch = State(initialValue: quickSwitch)
+        _tutorial = State(initialValue: TutorialController(registry: registry))
     }
 
     var body: some Scene {
@@ -81,6 +83,7 @@ struct GlancekitApp: App {
                 .environment(hotkeys)
                 .environment(quickSwitch)
                 .environment(updater)
+                .environment(tutorial)
         }
 
         // Standalone first-run window. Opened once on launch by MenuBarLabelView;
@@ -90,6 +93,7 @@ struct GlancekitApp: App {
             OnboardingView()
                 .environment(registry)
                 .environment(coordinator)
+                .environment(tutorial)
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)

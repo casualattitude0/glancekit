@@ -34,6 +34,7 @@ enum OnboardingState {
 struct OnboardingView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
+    @Environment(TutorialController.self) private var tutorial
     @Environment(\.dismiss) private var dismissWindow
 
     var body: some View {
@@ -71,10 +72,16 @@ struct OnboardingView: View {
             Divider()
 
             HStack {
+                Button("Skip") { dismiss() }
+                    .buttonStyle(.bordered)
                 Spacer()
-                Button("Get started") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                Button {
+                    startTour()
+                } label: {
+                    Label("Take a quick tour", systemImage: "sparkles")
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
             }
             .padding(16)
         }
@@ -101,5 +108,13 @@ struct OnboardingView: View {
     private func dismiss() {
         OnboardingState.markSeen()
         dismissWindow()
+    }
+
+    /// Close the welcome window and hand off to the guided tour, which opens
+    /// Settings and walks through the Glances and Shortcuts pages.
+    private func startTour() {
+        OnboardingState.markSeen()
+        dismissWindow()
+        tutorial.start()
     }
 }

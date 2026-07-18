@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Stable identifiers for the three app-wide "General" sidebar pages. These are
+/// sentinel `settingsSelection` values — not plugin ids — shared between
+/// `SettingsView` (which renders and selects them) and `TutorialController`
+/// (which drives the selection to walk the tour through them). Keeping them in
+/// one place stops the two from drifting apart.
+///
+/// Note the Glances page maps to `settingsSelection == nil` at the registry
+/// boundary (see `SettingsView.sidebarSelection`); `SettingsSection.glances` is
+/// only ever used as a `List` tag and a tutorial anchor id, never written to the
+/// registry directly.
+enum SettingsSection {
+    static let glances = "__glances__"
+    static let shortcuts = "__shortcuts__"
+    static let quickSwitch = "__quickswitch__"
+}
+
 /// The Settings window: a sidebar of sections beside a detail pane, matching the
 /// standard macOS settings layout (System Settings, Xcode, Mail).
 ///
@@ -14,15 +30,16 @@ struct SettingsView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
     @Environment(UpdateChecker.self) private var updater
+    @Environment(TutorialController.self) private var tutorial
 
     /// Sentinel `settingsSelection` values for the pages that aren't a plugin's
     /// own section. `registry.settingsSelection` uses `nil` for the Glances page
     /// (that's the deep-link contract the popover writes to), but a `List`
     /// selection reads `nil` as "nothing selected" — so the sidebar swaps in
     /// this sentinel and `sidebarSelection` maps it back at the boundary.
-    private static let glancesSelection = "__glances__"
-    private static let shortcutsSelection = "__shortcuts__"
-    private static let quickSwitchSelection = "__quickswitch__"
+    private static let glancesSelection = SettingsSection.glances
+    private static let shortcutsSelection = SettingsSection.shortcuts
+    private static let quickSwitchSelection = SettingsSection.quickSwitch
 
     /// Bridges the registry's `nil`-means-Glances contract to a `List` selection
     /// where `nil` means nothing is selected.
@@ -45,7 +62,22 @@ struct SettingsView: View {
         // The shortcut recorder swallows ⎋ while recording via a local event
         // monitor, which runs before the responder chain — so cancelling a
         // recording never falls through to closing the window.
-        .onExitCommand { SettingsWindowPresenter.close() }
+        .onExitCommand {
+            // ⎋ dismisses the guided tour if it's running; otherwise it closes
+            // the window as before. Otherwise a stray ⎋ mid-tour would shut the
+            // whole window instead of just stepping out of the coach mark.
+            if tutorial.isActive { tutorial.finish() } else { SettingsWindowPresenter.close() }
+        }
+        // The guided tour paints a spotlight over the relevant sidebar page and
+        // a callout beside it. It reads the sidebar rows' frames through the
+        // anchor preferences the `.tutorialAnchor` rows publish. Inert (and fully
+        // click-through) whenever no tour is running.
+        .overlayPreferenceValue(TutorialAnchorKey.self) { anchors in
+            GeometryReader { proxy in
+                TutorialOverlay(anchors: anchors, proxy: proxy)
+            }
+            .allowsHitTesting(tutorial.isActive)
+        }
     }
 
     // MARK: - Sidebar
@@ -55,10 +87,13 @@ struct SettingsView: View {
             Section("General") {
                 Label("Glances", systemImage: "square.grid.2x2")
                     .tag(Self.glancesSelection)
+                    .tutorialAnchor(SettingsSection.glances)
                 Label("Shortcuts", systemImage: "command")
                     .tag(Self.shortcutsSelection)
+                    .tutorialAnchor(SettingsSection.shortcuts)
                 Label("Quick Switch", systemImage: "rectangle.stack")
                     .tag(Self.quickSwitchSelection)
+                    .tutorialAnchor(SettingsSection.quickSwitch)
             }
 
             Section("Glances") {
@@ -151,6 +186,18 @@ struct SettingsView: View {
                 }
             }
             .frame(minHeight: 300)
+
+            // Re-runnable entry point for the guided tour, so it isn't a
+            // first-launch-only thing the user can never see again.
+            HStack {
+                Spacer()
+                Button {
+                    tutorial.start()
+                } label: {
+                    Label("Show tutorial", systemImage: "sparkles")
+                }
+                .buttonStyle(.link)
+            }
         }
     }
 
