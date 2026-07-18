@@ -38,6 +38,33 @@ final class NextMeetingPlugin: GlancePlugin {
     var upcomingCount: Int {
         didSet { UserDefaults.standard.set(upcomingCount, forKey: Keys.upcomingCount) }
     }
+    /// How many days ahead the "upcoming" list reaches.
+    var lookAheadDays: Int {
+        didSet { UserDefaults.standard.set(lookAheadDays, forKey: Keys.lookAheadDays) }
+    }
+    /// Max number of today's events to show.
+    var todayLimit: Int {
+        didSet { UserDefaults.standard.set(todayLimit, forKey: Keys.todayLimit) }
+    }
+    /// Hide all-day events (holidays, birthdays, multi-day trips).
+    var hideAllDay: Bool {
+        didSet { UserDefaults.standard.set(hideAllDay, forKey: Keys.hideAllDay) }
+    }
+    /// Include events the current user has declined.
+    var showDeclined: Bool {
+        didSet { UserDefaults.standard.set(showDeclined, forKey: Keys.showDeclined) }
+    }
+    /// Selected calendar identifiers. `nil` means every calendar (the default);
+    /// an empty set means the user has explicitly chosen none.
+    var selectedCalendarIDs: Set<String>? {
+        didSet {
+            if let selectedCalendarIDs {
+                UserDefaults.standard.set(Array(selectedCalendarIDs), forKey: Keys.selectedCalendars)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.selectedCalendars)
+            }
+        }
+    }
 
     // MARK: Live state
 
@@ -59,6 +86,11 @@ final class NextMeetingPlugin: GlancePlugin {
         static let autoOpenEnabled = "glancekit.nextmeeting.autoOpen"
         static let autoOpenMinutes = "glancekit.nextmeeting.autoOpenMinutes"
         static let upcomingCount = "glancekit.nextmeeting.upcomingCount"
+        static let lookAheadDays = "glancekit.nextmeeting.lookAheadDays"
+        static let todayLimit = "glancekit.nextmeeting.todayLimit"
+        static let hideAllDay = "glancekit.nextmeeting.hideAllDay"
+        static let showDeclined = "glancekit.nextmeeting.showDeclined"
+        static let selectedCalendars = "glancekit.nextmeeting.selectedCalendars"
     }
 
     init() {
@@ -67,6 +99,25 @@ final class NextMeetingPlugin: GlancePlugin {
         autoOpenEnabled = defaults.object(forKey: Keys.autoOpenEnabled) as? Bool ?? false
         autoOpenMinutes = defaults.object(forKey: Keys.autoOpenMinutes) as? Int ?? 1
         upcomingCount = defaults.object(forKey: Keys.upcomingCount) as? Int ?? 5
+        lookAheadDays = defaults.object(forKey: Keys.lookAheadDays) as? Int ?? 7
+        todayLimit = defaults.object(forKey: Keys.todayLimit) as? Int ?? 10
+        hideAllDay = defaults.object(forKey: Keys.hideAllDay) as? Bool ?? false
+        showDeclined = defaults.object(forKey: Keys.showDeclined) as? Bool ?? false
+        if let ids = defaults.object(forKey: Keys.selectedCalendars) as? [String] {
+            selectedCalendarIDs = Set(ids)
+        } else {
+            selectedCalendarIDs = nil
+        }
+    }
+
+    /// The filter shared by every query and the Smart Panel signal.
+    private var queryOptions: NextMeetingQueryOptions {
+        NextMeetingQueryOptions(
+            calendarIDs: selectedCalendarIDs,
+            hideAllDay: hideAllDay,
+            showDeclined: showDeclined,
+            lookAheadDays: lookAheadDays
+        )
     }
 
     // MARK: GlancePlugin
@@ -78,9 +129,47 @@ final class NextMeetingPlugin: GlancePlugin {
             upcoming = []
             return
         }
-        todayAgenda = feed.loadTodayAgenda()
-        upcoming = feed.loadUpcoming(limit: max(1, upcomingCount))
+        let options = queryOptions
+        todayAgenda = Array(feed.loadTodayAgenda(options: options).prefix(max(1, todayLimit)))
+        upcoming = feed.loadUpcoming(limit: max(1, upcomingCount), options: options)
         maybeAutoOpen()
+    }
+
+    /// The calendars available for selection (empty until access is granted).
+    func availableCalendars() -> [NextMeetingCalendar] {
+        feed.availableCalendars()
+    }
+
+    /// Whether a calendar is currently included. `nil` selection = all included.
+    func isCalendarSelected(_ id: String) -> Bool {
+        guard let selectedCalendarIDs else { return true }
+        return selectedCalendarIDs.contains(id)
+    }
+
+    /// Toggle a calendar in/out of the selection. Starting from the "all"
+    /// default (`nil`), the first toggle expands to the concrete set so the
+    /// change is explicit; a set covering every calendar collapses back to
+    /// `nil` so newly-added calendars are still included by default.
+    func setCalendar(_ id: String, included: Bool, allIDs: [String]) {
+        var set = selectedCalendarIDs ?? Set(allIDs)
+        if included { set.insert(id) } else { set.remove(id) }
+        if set == Set(allIDs) {
+            selectedCalendarIDs = nil
+        } else {
+            selectedCalendarIDs = set
+        }
+    }
+
+    /// Reset to "all calendars".
+    func selectAllCalendars() { selectedCalendarIDs = nil }
+
+    /// Explicitly select no calendars.
+    func selectNoCalendars() { selectedCalendarIDs = [] }
+
+    /// True only when the user has explicitly deselected every calendar.
+    var hasNoCalendarsSelected: Bool {
+        if let selectedCalendarIDs { return selectedCalendarIDs.isEmpty }
+        return false
     }
 
     /// Best-effort: if enabled and the next event with a meeting link is within
@@ -177,9 +266,27 @@ final class NextMeetingPlugin: GlancePlugin {
     }
 
     static func timeRange(_ event: NextMeetingEvent) -> String {
+        if event.isAllDay {
+            // Show the day for all-day events; single-day ones read "All day".
+            let cal = Calendar.current
+            if cal.isDate(event.startDate, inSameDayAs: event.endDate)
+                || event.endDate.timeIntervalSince(event.startDate) <= 86_400 {
+                return "All day"
+            }
+            let start = event.startDate.formatted(date: .abbreviated, time: .omitted)
+            let end = event.endDate.formatted(date: .abbreviated, time: .omitted)
+            return "All day · \(start) – \(end)"
+        }
         let start = event.startDate.formatted(date: .omitted, time: .shortened)
         let end = event.endDate.formatted(date: .omitted, time: .shortened)
         return "\(start) – \(end)"
+    }
+
+    /// Copies a URL to the general pasteboard.
+    static func copyLink(_ url: URL) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(url.absoluteString, forType: .string)
     }
 }
 
@@ -187,6 +294,8 @@ final class NextMeetingPlugin: GlancePlugin {
 
 private struct NextMeetingPopover: View {
     let plugin: NextMeetingPlugin
+    /// The event whose detail sheet is open, if any.
+    @State private var detailEvent: NextMeetingEvent?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -196,31 +305,63 @@ private struct NextMeetingPopover: View {
                     .foregroundStyle(.orange)
             }
 
-            NextMeetingNextCard(plugin: plugin)
-
-            NextMeetingAgendaSection(
-                title: "Today",
-                events: plugin.todayAgenda,
-                emptyText: "No more events today.",
-                showJoin: plugin.meetingJoinEnabled
-            )
-
-            if plugin.upcomingCount > 0 {
-                NextMeetingAgendaSection(
-                    title: "Upcoming",
-                    events: plugin.upcoming,
-                    emptyText: "No upcoming events.",
-                    showJoin: plugin.meetingJoinEnabled
+            if plugin.hasNoCalendarsSelected {
+                NextMeetingEmptyState(
+                    icon: "calendar.badge.exclamationmark",
+                    text: "No calendars selected. Choose calendars in Settings."
                 )
+            } else {
+                NextMeetingNextCard(plugin: plugin) { detailEvent = $0 }
+
+                NextMeetingAgendaSection(
+                    title: "Today",
+                    events: plugin.todayAgenda,
+                    emptyText: "No more events today.",
+                    showJoin: plugin.meetingJoinEnabled,
+                    onSelect: { detailEvent = $0 }
+                )
+
+                if plugin.upcomingCount > 0 {
+                    NextMeetingAgendaSection(
+                        title: "Upcoming",
+                        events: plugin.upcoming,
+                        emptyText: "No upcoming events.",
+                        showJoin: plugin.meetingJoinEnabled,
+                        onSelect: { detailEvent = $0 }
+                    )
+                }
             }
         }
         .task { await plugin.refresh() }
+        .sheet(item: $detailEvent) { event in
+            NextMeetingDetail(event: event, showJoin: plugin.meetingJoinEnabled) {
+                detailEvent = nil
+            }
+        }
+    }
+}
+
+private struct NextMeetingEmptyState: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: icon)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
     }
 }
 
 /// The hero card: countdown ring + title + Join for the next event.
 private struct NextMeetingNextCard: View {
     let plugin: NextMeetingPlugin
+    let onSelect: (NextMeetingEvent) -> Void
     /// Ticks once a second so the ring and "in Nm" stay live.
     @State private var now = Date()
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -266,16 +407,10 @@ private struct NextMeetingNextCard: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.primary.opacity(0.05))
                 )
+                .contentShape(Rectangle())
+                .onTapGesture { onSelect(event) }
             } else {
-                Label("No upcoming meetings.", systemImage: "calendar")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
+                NextMeetingEmptyState(icon: "calendar", text: "No upcoming meetings.")
             }
         }
         .onReceive(ticker) { now = $0 }
@@ -322,6 +457,7 @@ private struct NextMeetingAgendaSection: View {
     let events: [NextMeetingEvent]
     let emptyText: String
     let showJoin: Bool
+    let onSelect: (NextMeetingEvent) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -335,7 +471,7 @@ private struct NextMeetingAgendaSection: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(events) { event in
-                        NextMeetingRow(event: event, showJoin: showJoin)
+                        NextMeetingRow(event: event, showJoin: showJoin, onSelect: onSelect)
                     }
                 }
             }
@@ -346,6 +482,7 @@ private struct NextMeetingAgendaSection: View {
 private struct NextMeetingRow: View {
     let event: NextMeetingEvent
     let showJoin: Bool
+    let onSelect: (NextMeetingEvent) -> Void
 
     var body: some View {
         let meetingURL = showJoin ? event.meetingURL : nil
@@ -357,23 +494,156 @@ private struct NextMeetingRow: View {
                 Text(event.title)
                     .font(.body)
                     .lineLimit(1)
+                    .strikethrough(event.isDeclined, color: .secondary)
                 Text(NextMeetingPlugin.timeRange(event))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            if let url = meetingURL {
-                Image(systemName: "video.fill")
-                    .font(.caption)
-                    .foregroundStyle(.tint)
-                    .help("Join meeting")
+            if meetingURL != nil {
+                Button {
+                    if let url = meetingURL { NSWorkspace.shared.open(url) }
+                } label: {
+                    Image(systemName: "video.fill")
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                }
+                .buttonStyle(.plain)
+                .help("Join meeting")
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            if let url = meetingURL {
-                NSWorkspace.shared.open(url)
+        .onTapGesture { onSelect(event) }
+    }
+}
+
+// MARK: - Detail UI
+
+/// Full event detail: title, time range, calendar, location, notes, and every
+/// detected link with open/copy buttons.
+private struct NextMeetingDetail: View {
+    let event: NextMeetingEvent
+    let showJoin: Bool
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                Text(event.title)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(3)
+                Spacer(minLength: 8)
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close")
             }
+
+            if event.isDeclined {
+                Label("You declined this event", systemImage: "xmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            detailRow(icon: "clock", text: NextMeetingPlugin.timeRange(event))
+
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(event.calendarColor.swiftUIColor)
+                    .frame(width: 10, height: 10)
+                Text(event.calendarTitle)
+                    .font(.callout)
+            }
+
+            if let location = event.location, !location.isEmpty {
+                detailRow(icon: "mappin.and.ellipse", text: location)
+            }
+
+            if showJoin, let url = event.meetingURL {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("Join meeting", systemImage: "video")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+
+            let links = event.allLinks
+            if !links.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Links")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(links, id: \.absoluteString) { link in
+                        NextMeetingLinkRow(url: link)
+                    }
+                }
+            }
+
+            if let notes = event.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Notes")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 320)
+    }
+
+    @ViewBuilder
+    private func detailRow(icon: String, text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: icon)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(text)
+                .font(.callout)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct NextMeetingLinkRow: View {
+    let url: URL
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(url.absoluteString)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(.tint)
+            Spacer(minLength: 4)
+            Button {
+                NextMeetingPlugin.copyLink(url)
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.plain)
+            .help("Copy link")
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Image(systemName: "arrow.up.right.square")
+            }
+            .buttonStyle(.plain)
+            .help("Open link")
         }
     }
 }
@@ -404,12 +674,28 @@ private struct NextMeetingSettings: View {
 
             Divider()
 
-            Text("Upcoming").font(.headline)
+            Text("Agenda").font(.headline)
+            Stepper(
+                "Show up to \(plugin.todayLimit) event\(plugin.todayLimit == 1 ? "" : "s") today",
+                value: $plugin.todayLimit,
+                in: 1...20
+            )
             Stepper(
                 "Show \(plugin.upcomingCount) upcoming event\(plugin.upcomingCount == 1 ? "" : "s")",
                 value: $plugin.upcomingCount,
                 in: 0...10
             )
+            Stepper(
+                "Look ahead \(plugin.lookAheadDays) day\(plugin.lookAheadDays == 1 ? "" : "s")",
+                value: $plugin.lookAheadDays,
+                in: 1...30
+            )
+            Toggle("Hide all-day events", isOn: $plugin.hideAllDay)
+            Toggle("Show declined events", isOn: $plugin.showDeclined)
+
+            Divider()
+
+            NextMeetingCalendarPicker(plugin: plugin)
 
             Divider()
 
@@ -418,5 +704,62 @@ private struct NextMeetingSettings: View {
                 Task { await plugin.requestCalendarAccess() }
             }
         }
+    }
+}
+
+/// Multi-select list of the user's calendars. "All calendars" is the default
+/// (nil selection); toggling any calendar off makes the selection explicit.
+private struct NextMeetingCalendarPicker: View {
+    let plugin: NextMeetingPlugin
+    @State private var calendars: [NextMeetingCalendar] = []
+
+    private var allIDs: [String] { calendars.map(\.id) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Calendars").font(.headline)
+                Spacer()
+                Button("All") { plugin.selectAllCalendars() }
+                    .controlSize(.small)
+                Button("None") { plugin.selectNoCalendars() }
+                    .controlSize(.small)
+            }
+
+            if !plugin.calendarAuthorized {
+                Text("Grant Calendar access to choose calendars.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if calendars.isEmpty {
+                Text("No calendars found.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(calendars) { calendar in
+                    Toggle(isOn: Binding(
+                        get: { plugin.isCalendarSelected(calendar.id) },
+                        set: { plugin.setCalendar(calendar.id, included: $0, allIDs: allIDs) }
+                    )) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(calendar.color.swiftUIColor)
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(calendar.title)
+                                Text(calendar.sourceTitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if plugin.hasNoCalendarsSelected {
+                    Text("No calendars selected — the glance will be empty.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .onAppear { calendars = plugin.availableCalendars() }
     }
 }
