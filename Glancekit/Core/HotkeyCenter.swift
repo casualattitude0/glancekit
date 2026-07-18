@@ -2,59 +2,83 @@ import AppKit
 import Carbon.HIToolbox
 import Observation
 
-/// The things a global shortcut can trigger. Most actions open one glance's
-/// tool window (see `ToolWindowManager`); `quickSwitch` steps through the ring
-/// of glances the user picked on the Quick Switch settings page.
+/// The things a global shortcut can trigger.
 ///
-/// Declaration order is the order the Shortcuts settings page lists them in.
-///
-/// The raw value is the persistence key — never change it once shipped.
-enum ShortcutAction: String, CaseIterable, Identifiable {
-    case quickSwitch = "quickswitch"
-    case colors = "colors"
+/// The two app-level actions (`quickSwitch`, `settings`) aren't tied to a
+/// glance; `quickSwitch` steps through the ring of glances the user picked on
+/// the Quick Switch page and `settings` fronts the Settings window. Every
+/// registered glance also gets an action — `glance(pluginID:)` — that toggles
+/// that glance's tool window (see `ToolWindowManager`). The glance set is
+/// data-driven from the `PluginRegistry`, so a new plugin becomes assignable
+/// automatically with no case to add here.
+enum ShortcutAction: Hashable, Identifiable {
+    case quickSwitch
+    case settings
+    /// Opens (or closes) the menu-bar popover from anywhere.
+    case openMenubar
+    /// Opens the glance with this `GlancePlugin.id` in its tool window.
+    case glance(pluginID: String)
 
-    var id: String { rawValue }
+    var id: String { persistenceKey }
+
+    /// Stable identity and `UserDefaults` key. Never change once shipped — for
+    /// a glance it's the plugin id, which is what Colors/Notes shipped with, so
+    /// existing bindings survive the move to this data-driven form.
+    var persistenceKey: String {
+        switch self {
+        case .quickSwitch: "quickswitch"
+        case .settings: "settings"
+        case .openMenubar: "openmenubar"
+        case .glance(let pluginID): pluginID
+        }
+    }
 
     /// The `GlancePlugin.id` this action opens, or `nil` if it isn't tied to a
-    /// single glance. Distinct from `rawValue` (the persistence key) so the two
-    /// can be renamed independently.
+    /// single glance.
     var pluginID: String? {
         switch self {
-        case .quickSwitch: nil
-        case .colors: "colors"
+        case .quickSwitch, .settings, .openMenubar: nil
+        case .glance(let pluginID): pluginID
         }
     }
 
-    var title: String {
-        switch self {
-        case .quickSwitch: "Quick Switch"
-        case .colors: "Open Colors"
-        }
-    }
-
-    var subtitle: String? {
-        switch self {
-        case .quickSwitch: "Steps through the glances chosen on the Quick Switch page."
-        case .colors: nil
-        }
-    }
-
-    var iconSystemName: String {
-        switch self {
-        case .quickSwitch: "rectangle.stack"
-        case .colors: "eyedropper"
-        }
-    }
-
-    var defaultShortcut: GlobalShortcut {
+    /// The shortcut this action ships with, or `nil` if it has none — which is
+    /// the case for every glance except the two that shipped with a default.
+    /// New glances start unbound; the user assigns their own.
+    var defaultShortcut: GlobalShortcut? {
         switch self {
         case .quickSwitch:
             GlobalShortcut(keyCode: UInt16(kVK_Tab), modifiers: [.option])
-        case .colors:
-            GlobalShortcut(keyCode: UInt16(kVK_ANSI_1), modifiers: [.option])
+        case .settings:
+            GlobalShortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.option])
+        case .openMenubar:
+            GlobalShortcut(keyCode: UInt16(kVK_ANSI_M), modifiers: [.option])
+        case .glance(let pluginID):
+            Self.defaultGlanceShortcuts[pluginID]
         }
     }
 
+    /// The glance defaults that predate the data-driven form. Everything not
+    /// listed here defaults to unbound.
+    private static let defaultGlanceShortcuts: [String: GlobalShortcut] = [
+        "colors": GlobalShortcut(keyCode: UInt16(kVK_ANSI_1), modifiers: [.option]),
+        "notes": GlobalShortcut(keyCode: UInt16(kVK_ANSI_2), modifiers: [.option]),
+    ]
+
+    /// Display metadata for the two app-level actions. `nil` for `.glance`,
+    /// whose title and icon come from its `GlancePlugin`.
+    var appDisplay: (title: String, subtitle: String?, iconSystemName: String)? {
+        switch self {
+        case .quickSwitch:
+            ("Quick Switch", "Steps through the glances chosen on the Quick Switch page.", "rectangle.stack")
+        case .settings:
+            ("Open Settings", "Opens this window from any app. Press again, or ⎋, to close it.", "gearshape")
+        case .openMenubar:
+            ("Open Menu Bar", "Drops the menu-bar popover open from any app. Press again to close it.", "menubar.arrow.down.rectangle")
+        case .glance:
+            nil
+        }
+    }
 }
 
 /// Registers the app's global shortcuts with the system and dispatches presses.
@@ -89,14 +113,22 @@ final class HotkeyCenter {
     private var nextHotKeyID: UInt32 = 1
     private var eventHandler: EventHandlerRef?
 
+    /// Every action that exists: the two app actions plus one per registered
+    /// glance. Drives persistence and default-seeding (which need the full set,
+    /// unlike `bindings`, which only holds actions that are actually bound).
+    let allActions: [ShortcutAction]
+
     private let defaults: UserDefaults
     private static let bindingsKey = "glancekit.shortcuts.bindings"
     /// Marks an action as deliberately unbound (so it doesn't re-take its default).
     private static let clearedSentinel = "cleared"
 
-    init(defaults: UserDefaults = .standard) {
+    /// - Parameter glancePluginIDs: the id of every registered glance, in the
+    ///   order the Shortcuts page should list them (normally `registry.plugins`).
+    init(glancePluginIDs: [String], defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        bindings = Self.loadBindings(from: defaults)
+        self.allActions = [.quickSwitch, .settings, .openMenubar] + glancePluginIDs.map { .glance(pluginID: $0) }
+        bindings = Self.loadBindings(actions: allActions, from: defaults)
     }
 
     // No `deinit` teardown: the center is owned by the `App` for the whole
@@ -240,23 +272,26 @@ final class HotkeyCenter {
 
     private func persist() {
         var stored: [String: String] = [:]
-        for action in ShortcutAction.allCases {
+        for action in allActions {
             if let shortcut = bindings[action],
                let data = try? JSONEncoder().encode(shortcut) {
-                stored[action.rawValue] = String(decoding: data, as: UTF8.self)
+                stored[action.persistenceKey] = String(decoding: data, as: UTF8.self)
             } else {
-                stored[action.rawValue] = Self.clearedSentinel
+                stored[action.persistenceKey] = Self.clearedSentinel
             }
         }
         defaults.set(stored, forKey: Self.bindingsKey)
     }
 
-    private static func loadBindings(from defaults: UserDefaults) -> [ShortcutAction: GlobalShortcut] {
+    private static func loadBindings(
+        actions: [ShortcutAction],
+        from defaults: UserDefaults
+    ) -> [ShortcutAction: GlobalShortcut] {
         let stored = defaults.dictionary(forKey: bindingsKey) as? [String: String] ?? [:]
         var result: [ShortcutAction: GlobalShortcut] = [:]
 
-        for action in ShortcutAction.allCases {
-            let raw = stored[action.rawValue]
+        for action in actions {
+            let raw = stored[action.persistenceKey]
 
             guard let raw else {
                 result[action] = action.defaultShortcut // never configured

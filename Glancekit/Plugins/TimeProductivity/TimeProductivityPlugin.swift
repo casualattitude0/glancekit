@@ -4,7 +4,8 @@ import EventKit
 import AppKit
 
 /// Multi-feature productivity glance: world clocks, next calendar event,
-/// reminders, a Pomodoro timer, and a countdown to a target date.
+/// reminders, and a countdown to a target date. The Pomodoro timer that used to
+/// live here is its own glance (`Plugins/Pomodoro/`).
 ///
 /// All EventKit access is best-effort: denied/undetermined authorization
 /// never crashes `refresh()`, it just surfaces a "grant access" message in
@@ -28,9 +29,6 @@ final class TimeProductivityPlugin: GlancePlugin {
     var remindersEnabled: Bool {
         didSet { UserDefaults.standard.set(remindersEnabled, forKey: Keys.remindersEnabled) }
     }
-    var pomodoroEnabled: Bool {
-        didSet { UserDefaults.standard.set(pomodoroEnabled, forKey: Keys.pomodoroEnabled) }
-    }
     var countdownEnabled: Bool {
         didSet { UserDefaults.standard.set(countdownEnabled, forKey: Keys.countdownEnabled) }
     }
@@ -52,7 +50,6 @@ final class TimeProductivityPlugin: GlancePlugin {
 
     // MARK: Live state
 
-    let pomodoro = TimeProdPomodoro()
     private(set) var nextEvent: TimeProdEvent?
     private(set) var reminders: [TimeProdReminder] = []
     private(set) var lastError: String?
@@ -63,7 +60,6 @@ final class TimeProductivityPlugin: GlancePlugin {
         static let worldClocksEnabled = "glancekit.timeprod.worldClocks"
         static let calendarEnabled = "glancekit.timeprod.calendar"
         static let remindersEnabled = "glancekit.timeprod.reminders"
-        static let pomodoroEnabled = "glancekit.timeprod.pomodoro"
         static let countdownEnabled = "glancekit.timeprod.countdown"
         static let meetingJoinEnabled = "glancekit.timeprod.meetingJoin"
         static let zones = "glancekit.timeprod.zones"
@@ -76,7 +72,6 @@ final class TimeProductivityPlugin: GlancePlugin {
         worldClocksEnabled = defaults.object(forKey: Keys.worldClocksEnabled) as? Bool ?? true
         calendarEnabled = defaults.object(forKey: Keys.calendarEnabled) as? Bool ?? true
         remindersEnabled = defaults.object(forKey: Keys.remindersEnabled) as? Bool ?? true
-        pomodoroEnabled = defaults.object(forKey: Keys.pomodoroEnabled) as? Bool ?? true
         countdownEnabled = defaults.object(forKey: Keys.countdownEnabled) as? Bool ?? true
         meetingJoinEnabled = defaults.object(forKey: Keys.meetingJoinEnabled) as? Bool ?? true
 
@@ -126,7 +121,7 @@ final class TimeProductivityPlugin: GlancePlugin {
     var remindersAuthorized: Bool { feed.remindersAuthState == .authorized }
 
     /// Only the enabled EventKit-backed features contribute a permission. The
-    /// permission-free features (world clocks, Pomodoro, countdown) never gate
+    /// permission-free features (world clocks, countdown) never gate
     /// the section — but if an enabled calendar/reminders feature isn't yet
     /// authorized, the section shows a grant prompt first.
     var requiredPermissions: [GlancePermission] {
@@ -220,12 +215,6 @@ private struct TimeProdPopover: View {
             if plugin.remindersEnabled {
                 TimeProdSection(title: "Reminders") {
                     TimeProdRemindersBody(plugin: plugin)
-                }
-            }
-
-            if plugin.pomodoroEnabled {
-                TimeProdSection(title: "Pomodoro") {
-                    TimeProdPomodoroControls(pomodoro: plugin.pomodoro)
                 }
             }
 
@@ -330,28 +319,6 @@ private struct TimeProdAccessPrompt: View {
     }
 }
 
-private struct TimeProdPomodoroControls: View {
-    @Bindable var pomodoro: TimeProdPomodoro
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(pomodoro.phase.rawValue).font(.caption).foregroundStyle(.secondary)
-                Text(pomodoro.remainingText).font(.title3.monospacedDigit())
-            }
-            Spacer()
-            HStack(spacing: 6) {
-                Button(pomodoro.isRunning ? "Pause" : "Start") {
-                    pomodoro.isRunning ? pomodoro.pause() : pomodoro.start()
-                }
-                .controlSize(.small)
-                Button("Reset") { pomodoro.reset() }
-                    .controlSize(.small)
-            }
-        }
-    }
-}
-
 // MARK: - Settings UI
 
 private struct TimeProdSettings: View {
@@ -364,7 +331,6 @@ private struct TimeProdSettings: View {
             Toggle("World clocks", isOn: $plugin.worldClocksEnabled)
             Toggle("Calendar next event", isOn: $plugin.calendarEnabled)
             Toggle("Reminders", isOn: $plugin.remindersEnabled)
-            Toggle("Pomodoro timer", isOn: $plugin.pomodoroEnabled)
             Toggle("Countdown", isOn: $plugin.countdownEnabled)
             Toggle("Meeting join button", isOn: $plugin.meetingJoinEnabled)
 

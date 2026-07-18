@@ -16,7 +16,13 @@ final class UpdateChecker {
         case idle
         case checking
         case upToDate
-        case downloading(progress: Double)
+        /// `progress` is a 0...1 fraction of bytes received once the response
+        /// discloses a Content-Length, and `nil` while the total is unknown.
+        /// GitHub's asset redirect can answer without one, and `URLSession` then
+        /// reports `NSURLSessionTransferSizeUnknown` for the expected size, which
+        /// no fraction can be computed from. `nil` says "indeterminate" so the UI
+        /// can show a spinner, rather than a number nobody measured.
+        case downloading(progress: Double?)
         case downloaded(URL)
         case updateAvailable(Release)   // newer release, but no downloadable asset
         case failed(String)
@@ -36,6 +42,12 @@ final class UpdateChecker {
     private(set) var phase: Phase = .idle
 
     private let network = NetworkClient()
+
+    /// Highest fraction published for the download in flight, reset per download.
+    /// Main-actor state, deliberately separate from the delegate's own throttle:
+    /// each report crosses the queue boundary as its own Task, and those are not
+    /// guaranteed to run in the order they were created.
+    private var progressFloor: Double = -1
 
     /// Current version from the app bundle (falls back to "0" if unreadable).
     var currentVersion: String {
@@ -118,19 +130,50 @@ final class UpdateChecker {
         return 2
     }
 
+    /// Download to ~/Downloads, reporting byte progress as it goes.
+    ///
+    /// `URLSession.download(from:)` is the shorter call, but it hands back only a
+    /// finished file: there is no byte-level callback anywhere in it, which is why
+    /// this went through a delegate instead.
     private func download(_ url: URL, suggestedName: String?) async throws -> URL {
-        phase = .downloading(progress: 0)
-        let (tempURL, response) = try await URLSession.shared.download(from: url)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw NetworkClient.NetworkError.http(http.statusCode)
-        }
+        // Indeterminate until the first callback tells us whether a total exists.
+        phase = .downloading(progress: nil)
+        progressFloor = -1
 
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let name = suggestedName ?? url.lastPathComponent
-        let dest = Self.uniqueDestination(in: downloads, name: name)
-        try FileManager.default.moveItem(at: tempURL, to: dest)
-        return dest
+
+        // Delegate callbacks land on the session's own queue, so a fraction has
+        // to hop to the main actor before it touches @Observable state. Each hop
+        // is its own Task, and two Tasks enqueued back to back can run in either
+        // order, so the delegate's ascending fractions can arrive descending.
+        // The floor drops any report that would walk the bar backwards, and the
+        // phase guard drops reports that land after checkAndDownload() has
+        // already advanced to .downloaded.
+        let report: @Sendable (Double?) -> Void = { [weak self] fraction in
+            Task { @MainActor in
+                guard let self, case .downloading = self.phase else { return }
+                if let fraction {
+                    guard fraction >= self.progressFloor else { return }
+                    self.progressFloor = fraction
+                }
+                self.phase = .downloading(progress: fraction)
+            }
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let delegate = DownloadDelegate(
+                destination: { @Sendable in Self.uniqueDestination(in: downloads, name: name) },
+                onProgress: report,
+                continuation: continuation
+            )
+            // A session holds its delegate until invalidated. Invalidating right
+            // after resume() still lets this task finish, and then releases both.
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            session.downloadTask(with: url).resume()
+            session.finishTasksAndInvalidate()
+        }
     }
 
     // MARK: - Helpers
@@ -141,7 +184,12 @@ final class UpdateChecker {
     }
 
     /// Avoid clobbering an existing download by appending " (n)" before the ext.
-    private static func uniqueDestination(in dir: URL, name: String) -> URL {
+    ///
+    /// `nonisolated` because the delegate calls this from the session's queue,
+    /// synchronously, while the temp file still exists. It reads no main-actor
+    /// state, so claiming main-actor isolation would only be a lie the compiler
+    /// stops believing under Swift 6. Keep it free of `self` for that reason.
+    nonisolated private static func uniqueDestination(in dir: URL, name: String) -> URL {
         let fm = FileManager.default
         var candidate = dir.appendingPathComponent(name)
         guard fm.fileExists(atPath: candidate.path) else { return candidate }
@@ -177,5 +225,96 @@ final class UpdateChecker {
             if l != r { return l > r }
         }
         return false
+    }
+}
+
+/// Carries one download's byte counts back to `UpdateChecker`.
+///
+/// `URLSessionDownloadDelegate` is an `@objc` protocol and needs an `NSObject`.
+/// `UpdateChecker` can't be that itself: it's `@MainActor @Observable`, and the
+/// macro's observation would then sit on top of NSObject's KVO, while the session
+/// called main-actor methods from its own queue. A separate forwarder keeps the
+/// two worlds apart — it lives entirely on the session's queue and hands values
+/// across one explicit main-actor hop that `onProgress` owns.
+private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    /// Resolved inside `didFinishDownloadingTo`, not before: the "(2)" suffix
+    /// search only means anything at the moment the file is about to land.
+    private let destination: @Sendable () -> URL
+    private let onProgress: @Sendable (Double?) -> Void
+    private var continuation: CheckedContinuation<URL, Error>?
+    /// Last fraction handed upward, so a hundred-megabyte .dmg doesn't queue a
+    /// main-actor hop per packet.
+    private var lastReported: Double = -1
+    private var reportedIndeterminate = false
+
+    init(destination: @escaping @Sendable () -> URL,
+         onProgress: @escaping @Sendable (Double?) -> Void,
+         continuation: CheckedContinuation<URL, Error>) {
+        self.destination = destination
+        self.onProgress = onProgress
+        self.continuation = continuation
+    }
+
+    /// A session serializes its delegate callbacks, so the state above needs no
+    /// lock. What it does need is once-only resumption: a successful download
+    /// fires `didFinishDownloadingTo` *and* `didCompleteWithError`, and resuming
+    /// a continuation twice traps.
+    private func finish(_ result: Result<URL, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(with: result)
+    }
+
+    func urlSession(_ session: URLSession,
+                    downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64,
+                    totalBytesExpectedToWrite: Int64) {
+        // NSURLSessionTransferSizeUnknown (-1) when the response carried no
+        // Content-Length. Report the absence once and stay quiet after that.
+        // A redirect can also drop the length mid-stream, after a real fraction
+        // has been shown; collapsing the bar to a spinner then would discard a
+        // measurement the user already has, so hold the last fraction instead.
+        guard totalBytesExpectedToWrite > 0 else {
+            guard lastReported < 0, !reportedIndeterminate else { return }
+            reportedIndeterminate = true
+            onProgress(nil)
+            return
+        }
+        let fraction = min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+        guard fraction - lastReported >= 0.01 || fraction >= 1 else { return }
+        lastReported = fraction
+        onProgress(fraction)
+    }
+
+    func urlSession(_ session: URLSession,
+                    downloadTask: URLSessionDownloadTask,
+                    didFinishDownloadingTo location: URL) {
+        if let http = downloadTask.response as? HTTPURLResponse,
+           !(200...299).contains(http.statusCode) {
+            finish(.failure(NetworkClient.NetworkError.http(http.statusCode)))
+            return
+        }
+        // `location` is unlinked as soon as this method returns, so the move has
+        // to run here and now. Handing the URL to a Task would race the delete.
+        do {
+            let dest = destination()
+            try FileManager.default.moveItem(at: location, to: dest)
+            finish(.success(dest))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    didCompleteWithError error: Error?) {
+        if let error {
+            finish(.failure(error))
+        } else {
+            // A successful download already resumed above, making this a no-op.
+            // Landing here with no error and no file means nothing was written.
+            finish(.failure(URLError(.zeroByteResource)))
+        }
     }
 }

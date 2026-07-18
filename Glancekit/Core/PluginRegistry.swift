@@ -38,6 +38,7 @@ final class PluginRegistry {
             enabledIDs = [] // seeded on first register() call below
         }
         migrateColorGlances()
+        migratePomodoroSplit()
     }
 
     // MARK: - Migrations
@@ -80,6 +81,40 @@ final class PluginRegistry {
         persist()
     }
 
+    /// One-shot: the Pomodoro timer left the "timeprod" glance and became the
+    /// standalone "pomodoro" glance. Lands it next to the glance it came out of
+    /// and carries over whether the user had the sub-feature switched on.
+    ///
+    /// Without this the new glance would be missing from `enabledIDs` — and
+    /// `register()` only seeds enabled state on a first-ever launch — so anyone
+    /// already using the Pomodoro timer would find it silently gone.
+    private func migratePomodoroSplit() {
+        let migrationKey = "glancekit.migration.pomodoroSplit"
+        guard !defaults.bool(forKey: migrationKey) else { return }
+        defaults.set(true, forKey: migrationKey)
+
+        let source = "timeprod"
+        let split = "pomodoro"
+        let featureKey = "glancekit.timeprod.pomodoro"
+
+        // Fresh install: nothing to carry over. Returning before `persist()`
+        // matters — writing the (empty) keys here would make `register()` think
+        // this isn't a first launch and skip seeding every glance on.
+        guard orderedIDs.contains(source) else { return }
+
+        if !orderedIDs.contains(split), let slot = orderedIDs.firstIndex(of: source) {
+            orderedIDs.insert(split, at: slot + 1)
+        }
+        // The sub-feature defaulted on, so a missing key means it was on.
+        let wasShowingPomodoro = defaults.object(forKey: featureKey) as? Bool ?? true
+        if enabledIDs.contains(source), wasShowingPomodoro {
+            enabledIDs.insert(split)
+        }
+        defaults.removeObject(forKey: featureKey)
+
+        persist()
+    }
+
     /// Register a plugin. Call once per plugin during app startup.
     func register(_ plugin: any GlancePlugin) {
         guard !plugins.contains(where: { $0.id == plugin.id }) else { return }
@@ -112,11 +147,30 @@ final class PluginRegistry {
         persist()
     }
 
-    /// Move a plugin within the ordered list (for drag-to-reorder in Settings).
-    func move(fromOffsets: IndexSet, toOffset: Int) {
-        var ids = orderedPlugins.map { $0.id }
-        ids.move(fromOffsets: fromOffsets, toOffset: toOffset)
-        orderedIDs = ids
+    /// Plugins the user has disabled, in the user's chosen order. Disabled
+    /// glances keep their slot in `orderedIDs`, so re-enabling one drops it back
+    /// where it was rather than at the end.
+    var disabledPluginsInOrder: [any GlancePlugin] {
+        orderedPlugins.filter { !enabledIDs.contains($0.id) }
+    }
+
+    /// Move a plugin within one half of the list (for drag-to-reorder in
+    /// Settings, which lists the enabled and disabled glances as separate
+    /// groups). Offsets are relative to that group alone.
+    ///
+    /// The moved ids are written back into the slots that group already occupied
+    /// in `orderedIDs`, so reordering the enabled glances never shifts a disabled
+    /// one out from between its neighbors — it stays put and keeps the position
+    /// it will reappear at when switched back on.
+    func move(enabled: Bool, fromOffsets: IndexSet, toOffset: Int) {
+        var group = (enabled ? enabledPluginsInOrder : disabledPluginsInOrder).map { $0.id }
+        group.move(fromOffsets: fromOffsets, toOffset: toOffset)
+
+        // Only ids that resolved to a registered plugin are in `group`; matching
+        // on that set keeps a stale id in `orderedIDs` from consuming a slot.
+        let slots = Set(group)
+        var next = group.makeIterator()
+        orderedIDs = orderedIDs.map { slots.contains($0) ? (next.next() ?? $0) : $0 }
         persist()
     }
 

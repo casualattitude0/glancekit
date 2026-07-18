@@ -59,20 +59,8 @@ struct PopoverRootView: View {
         // The menu-bar popover is the key window at click time; capture it now so
         // we can dismiss it once Settings is open.
         let popover = NSApp.keyWindow
-        // LSUIElement apps aren't "active", so the Settings window opens behind
-        // other apps (or not at all). Activate first, then open.
-        NSApp.activate(ignoringOtherApps: true)
-        openSettings()
+        SettingsWindowPresenter.present { openSettings() }
         popover?.close()
-        // The menu-bar popover is a floating window that otherwise stays above
-        // the Settings window; explicitly raise Settings to the front once it
-        // exists (next runloop).
-        DispatchQueue.main.async {
-            guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "com_apple_SwiftUI_Settings_window" }) else { return }
-            window.level = .normal
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
-        }
     }
 
     private var header: some View {

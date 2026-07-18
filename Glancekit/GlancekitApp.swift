@@ -7,26 +7,24 @@ struct GlancekitApp: App {
     @State private var updater = UpdateChecker()
     @State private var hotkeys: HotkeyCenter
     @State private var quickSwitch: QuickSwitchStore
+    @State private var tutorial: TutorialController
 
     init() {
         let registry = PluginRegistry()
 
         // ── Plugin registration ───────────────────────────────────────────
-        // Stage 1 registers the flagship. Stage 3 appends one line per plugin
-        // that the Stage 2 sub-agents produce, e.g.:
-        //   registry.register(SystemStatsPlugin())
-        //   registry.register(PhotosPlugin())
-        //   registry.register(GitHubPlugin())
-        //   registry.register(CustomAPIPlugin())
-        //   registry.register(ColorsPlugin())
+        // Registration order is the default popover order for a new install;
+        // the user's own order, once set, overrides it.
         registry.register(StocksPlugin())
         registry.register(SystemStatsPlugin())
         registry.register(TimeProductivityPlugin())
+        registry.register(PomodoroPlugin())
         registry.register(PhotosPlugin())
         registry.register(GitHubPlugin())
         registry.register(CustomAPIPlugin())
         registry.register(ColorsPlugin())
         registry.register(WeatherPlugin())
+        registry.register(NotesPlugin())
         // ──────────────────────────────────────────────────────────────────
 
         // Seed after registration so the ring knows every glance that exists.
@@ -34,17 +32,24 @@ struct GlancekitApp: App {
         quickSwitch.seed(with: registry.plugins.map(\.id))
 
         // ── Global shortcuts ──────────────────────────────────────────────
-        // A glance action toggles its tool window open at the mouse (⌥1 by
-        // default); Quick Switch steps through the ring (⌥⇥). Both are
-        // rebindable on the Shortcuts settings page.
-        let hotkeys = HotkeyCenter()
-        for action in ShortcutAction.allCases {
+        // Every glance gets an action that toggles its tool window open at the
+        // mouse (Colors on ⌥1, Notes on ⌥2 by default; the rest start unbound);
+        // Quick Switch steps through the ring (⌥⇥); Open Settings fronts the
+        // Settings window (⌥`). All are rebindable on the Shortcuts settings
+        // page. The glance actions are derived from the registry, so registering
+        // a new plugin makes it assignable with no wiring change here.
+        let hotkeys = HotkeyCenter(glancePluginIDs: registry.plugins.map(\.id))
+        for action in hotkeys.allActions {
             hotkeys.setHandler(for: action) {
                 switch action {
                 case .quickSwitch:
                     ToolWindowManager.shared.quickSwitch(among: quickSwitch.ring(in: registry))
-                case .colors:
-                    guard let plugin = action.pluginID.flatMap(registry.plugin(id:)) else { return }
+                case .settings:
+                    SettingsWindowPresenter.toggle()
+                case .openMenubar:
+                    MenuBarPresenter.toggle()
+                case .glance(let pluginID):
+                    guard let plugin = registry.plugin(id: pluginID) else { return }
                     ToolWindowManager.shared.toggle(plugin: plugin)
                 }
             }
@@ -55,6 +60,7 @@ struct GlancekitApp: App {
         _coordinator = State(initialValue: RefreshCoordinator(registry: registry))
         _hotkeys = State(initialValue: hotkeys)
         _quickSwitch = State(initialValue: quickSwitch)
+        _tutorial = State(initialValue: TutorialController(registry: registry))
     }
 
     var body: some Scene {
@@ -63,7 +69,6 @@ struct GlancekitApp: App {
                 .environment(registry)
                 .environment(coordinator)
                 .frame(width: 340)
-                .onAppear { coordinator.start() }
         } label: {
             MenuBarLabelView()
                 .environment(registry)
@@ -78,6 +83,7 @@ struct GlancekitApp: App {
                 .environment(hotkeys)
                 .environment(quickSwitch)
                 .environment(updater)
+                .environment(tutorial)
         }
 
         // Standalone first-run window. Opened once on launch by MenuBarLabelView;
@@ -87,6 +93,7 @@ struct GlancekitApp: App {
             OnboardingView()
                 .environment(registry)
                 .environment(coordinator)
+                .environment(tutorial)
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)

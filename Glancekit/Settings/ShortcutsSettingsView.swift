@@ -2,23 +2,83 @@ import SwiftUI
 import AppKit
 import Carbon.HIToolbox
 
-/// The "Shortcuts" settings page: one recorder row per `ShortcutAction`.
+/// The "Shortcuts" settings page: an "App" group for the two app-level actions
+/// and a "Glances" group with one recorder row per registered glance.
 struct ShortcutsSettingsView: View {
     @Environment(HotkeyCenter.self) private var hotkeys
+    @Environment(PluginRegistry.self) private var registry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Global Shortcuts")
                 .font(.headline)
 
-            Text("These work anywhere in macOS, even when Glancekit isn't frontmost. They open a glance in its own window at the mouse. Press the shortcut again — or click outside the window, or press Close — to dismiss it.")
+            Text("These work anywhere in macOS, even when Glancekit isn't frontmost. Most open a glance in its own window at the mouse. Press the shortcut again — or click outside the window, or press Close — to dismiss it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            ShortcutSectionGroup(title: "App", rows: appRows)
+            ShortcutSectionGroup(title: "Glances", rows: glanceRows)
+
+            Text("Click a shortcut to record a new one; it needs at least one of ⌘, ⌥ or ⌃. Press ⎋ to cancel or ⌫ to clear.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var appRows: [ShortcutRowInfo] {
+        [ShortcutAction.quickSwitch, .settings, .openMenubar].compactMap { action in
+            action.appDisplay.map { display in
+                ShortcutRowInfo(
+                    action: action,
+                    title: display.title,
+                    subtitle: display.subtitle,
+                    iconSystemName: display.iconSystemName
+                )
+            }
+        }
+    }
+
+    private var glanceRows: [ShortcutRowInfo] {
+        registry.plugins.map { plugin in
+            ShortcutRowInfo(
+                action: .glance(pluginID: plugin.id),
+                title: plugin.title,
+                subtitle: nil,
+                iconSystemName: plugin.iconSystemName
+            )
+        }
+    }
+}
+
+/// The bits a shortcut row needs to render. App actions carry their own
+/// display text; glance rows pull theirs from the `GlancePlugin`.
+private struct ShortcutRowInfo: Identifiable {
+    let action: ShortcutAction
+    let title: String
+    let subtitle: String?
+    let iconSystemName: String
+
+    var id: String { action.id }
+}
+
+/// One titled group of shortcut rows (e.g. "App" or "Glances").
+private struct ShortcutSectionGroup: View {
+    let title: String
+    let rows: [ShortcutRowInfo]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
             VStack(spacing: 0) {
-                ForEach(Array(ShortcutAction.allCases.enumerated()), id: \.element.id) { index, action in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { Divider() }
-                    ShortcutRow(action: action)
+                    ShortcutRow(info: row)
                 }
             }
             .padding(.vertical, 4)
@@ -30,26 +90,21 @@ struct ShortcutsSettingsView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(.quaternary)
             )
-
-            Text("Click a shortcut to record a new one; it needs at least one of ⌘, ⌥ or ⌃. Press ⎋ to cancel or ⌫ to clear.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Spacer(minLength: 0)
         }
     }
 }
 
 private struct ShortcutRow: View {
-    let action: ShortcutAction
+    let info: ShortcutRowInfo
     @Environment(HotkeyCenter.self) private var hotkeys
 
     var body: some View {
+        let action = info.action
         let shortcut = hotkeys.shortcut(for: action)
 
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Label(action.title, systemImage: action.iconSystemName)
+                Label(info.title, systemImage: info.iconSystemName)
 
                 Spacer()
 
@@ -63,11 +118,11 @@ private struct ShortcutRow: View {
                     Image(systemName: "arrow.uturn.backward")
                 }
                 .buttonStyle(.borderless)
-                .help("Reset to \(action.defaultShortcut.displayString)")
+                .help(resetHelp)
                 .disabled(shortcut == action.defaultShortcut)
             }
 
-            if let subtitle = action.subtitle {
+            if let subtitle = info.subtitle {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -88,6 +143,15 @@ private struct ShortcutRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// "Reset to ⌥1" when there's a default, "Clear shortcut" when there isn't.
+    private var resetHelp: String {
+        if let def = info.action.defaultShortcut {
+            "Reset to \(def.displayString)"
+        } else {
+            "Clear shortcut"
+        }
     }
 }
 

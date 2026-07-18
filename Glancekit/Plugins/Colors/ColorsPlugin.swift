@@ -31,10 +31,11 @@ final class ColorsPlugin: GlancePlugin {
     nonisolated var iconSystemName: String { "eyedropper" }
     var refreshInterval: TimeInterval { 0 }
 
-    // Defaults keys keep their original "colorpicker" names so existing pick
-    // history and the uppercase preference survive the merge.
-    private let recentKey = "glancekit.colorpicker.recent"
-    private let uppercaseKey = "glancekit.colorpicker.uppercase"
+    // Namespaced under this glance's id, per the plugin contract. Pick history
+    // and the uppercase preference predate the merge under "colorpicker" names;
+    // `migrateColorPickerKeys()` carries them across.
+    private let recentKey = "glancekit.colors.recent"
+    private let uppercaseKey = "glancekit.colors.uppercase"
     private let maxRecents = 12
 
     /// Current color in HSB, each component 0...1.
@@ -51,10 +52,72 @@ final class ColorsPlugin: GlancePlugin {
     }
 
     init() {
+        // Must precede the reads below: they look at the new keys, which only
+        // hold anything for a pre-merge user once the migration has moved them.
+        Self.migrateColorPickerKeys()
+
         recentHexes = UserDefaults.standard.stringArray(forKey: recentKey) ?? []
         uppercase = UserDefaults.standard.object(forKey: uppercaseKey) as? Bool ?? true
         // Reopen on the last color picked, so the tool resumes where it left off.
         if let last = recentHexes.first { select(hex: last) }
+    }
+
+    // MARK: - Migrations
+
+    /// One-shot: pick history and the uppercase preference were left under the
+    /// pre-merge "colorpicker" names when the picker and palette glances merged
+    /// into "colors" (favorites already moved). Two namespaces for one glance is
+    /// a trap for whoever writes the next migration, so this closes the drift.
+    ///
+    /// The old key is the source of truth until the flag latches, and it wins
+    /// unconditionally. No shipped build ever wrote a "colors" recent/uppercase
+    /// key, so anything sitting there came from a dev build and is not user
+    /// history worth protecting; the pre-merge value is. Letting the new key win
+    /// instead needs a "did we already move this?" signal, and the only honest
+    /// one is the flag, which is what this reads at the top.
+    ///
+    /// Order matters: latch the flag BEFORE deleting the old keys. Every kill
+    /// point is then either safe or harmless.
+    ///
+    /// - Killed before the latch: the old keys are untouched and the new keys
+    ///   hold a copy of them, so the next launch redoes identical work. Nothing
+    ///   is lost because the plugin has not read anything yet, this being the
+    ///   first statement of `init()`.
+    /// - Killed after the latch, before the deletes: the new keys are correct
+    ///   and the old ones linger as orphans that nothing reads. Harmless.
+    ///
+    /// Doing it the other way around (delete, then latch) would leave a window
+    /// where both copies are gone. There is deliberately no read-back check: a
+    /// `set` followed by a `get` hits the same in-memory cache, so a check could
+    /// only ever fail spuriously, and the recovery path for a spurious failure
+    /// is what would put the history at risk.
+    ///
+    /// This differs from `PluginRegistry.migrateColorGlances()`, which needs an
+    /// early return before its `persist()` because its enabled key doubles as
+    /// the "have we launched before" signal. This flag is private to this
+    /// glance and gates nothing else, so writing it on a fresh install is inert.
+    private static func migrateColorPickerKeys() {
+        let defaults = UserDefaults.standard
+        let migrationKey = "glancekit.migration.colorkeys"
+        guard !defaults.bool(forKey: migrationKey) else { return }
+
+        let moves = [
+            ("glancekit.colorpicker.recent", "glancekit.colors.recent"),
+            ("glancekit.colorpicker.uppercase", "glancekit.colors.uppercase"),
+        ]
+
+        var oldKeysToDrop: [String] = []
+        for (oldKey, newKey) in moves {
+            // Absent means a fresh install, or an interrupted run that already
+            // dropped this one. Writing a default here would stamp over the new
+            // key, so leave both alone.
+            guard let oldValue = defaults.object(forKey: oldKey) else { continue }
+            defaults.set(oldValue, forKey: newKey)
+            oldKeysToDrop.append(oldKey)
+        }
+
+        defaults.set(true, forKey: migrationKey)
+        for oldKey in oldKeysToDrop { defaults.removeObject(forKey: oldKey) }
     }
 
     /// Current color components, 0...255 (derived from HSB).

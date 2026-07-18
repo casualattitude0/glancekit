@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Stable identifiers for the three app-wide "General" sidebar pages. These are
+/// sentinel `settingsSelection` values — not plugin ids — shared between
+/// `SettingsView` (which renders and selects them) and `TutorialController`
+/// (which drives the selection to walk the tour through them). Keeping them in
+/// one place stops the two from drifting apart.
+///
+/// Note the Glances page maps to `settingsSelection == nil` at the registry
+/// boundary (see `SettingsView.sidebarSelection`); `SettingsSection.glances` is
+/// only ever used as a `List` tag and a tutorial anchor id, never written to the
+/// registry directly.
+enum SettingsSection {
+    static let glances = "__glances__"
+    static let shortcuts = "__shortcuts__"
+    static let quickSwitch = "__quickswitch__"
+}
+
 /// The Settings window: a sidebar of sections beside a detail pane, matching the
 /// standard macOS settings layout (System Settings, Xcode, Mail).
 ///
@@ -7,21 +23,23 @@ import SwiftUI
 /// `TabView`, whose tab bar overflowed extra plugins into a `>>` dropdown. A
 /// sidebar list scrolls vertically and stays legible however many plugins are
 /// registered. The first group holds the app-wide pages ("Glances" — toggle +
-/// drag-to-reorder, with the update check below — and "Shortcuts"); the second lists each plugin's own
+/// drag-to-reorder, with the update check above — and "Shortcuts"); the second
+/// lists each plugin's own
 /// `settingsSection()`.
 struct SettingsView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
     @Environment(UpdateChecker.self) private var updater
+    @Environment(TutorialController.self) private var tutorial
 
     /// Sentinel `settingsSelection` values for the pages that aren't a plugin's
     /// own section. `registry.settingsSelection` uses `nil` for the Glances page
     /// (that's the deep-link contract the popover writes to), but a `List`
     /// selection reads `nil` as "nothing selected" — so the sidebar swaps in
     /// this sentinel and `sidebarSelection` maps it back at the boundary.
-    private static let glancesSelection = "__glances__"
-    private static let shortcutsSelection = "__shortcuts__"
-    private static let quickSwitchSelection = "__quickswitch__"
+    private static let glancesSelection = SettingsSection.glances
+    private static let shortcutsSelection = SettingsSection.shortcuts
+    private static let quickSwitchSelection = SettingsSection.quickSwitch
 
     /// Bridges the registry's `nil`-means-Glances contract to a `List` selection
     /// where `nil` means nothing is selected.
@@ -40,6 +58,26 @@ struct SettingsView: View {
             detail
         }
         .frame(width: 620, height: 460)
+        // Settings has no Cancel button to bind ⎋ to, so nothing else claims it.
+        // The shortcut recorder swallows ⎋ while recording via a local event
+        // monitor, which runs before the responder chain — so cancelling a
+        // recording never falls through to closing the window.
+        .onExitCommand {
+            // ⎋ dismisses the guided tour if it's running; otherwise it closes
+            // the window as before. Otherwise a stray ⎋ mid-tour would shut the
+            // whole window instead of just stepping out of the coach mark.
+            if tutorial.isActive { tutorial.finish() } else { SettingsWindowPresenter.close() }
+        }
+        // The guided tour paints a spotlight over the relevant sidebar page and
+        // a callout beside it. It reads the sidebar rows' frames through the
+        // anchor preferences the `.tutorialAnchor` rows publish. Inert (and fully
+        // click-through) whenever no tour is running.
+        .overlayPreferenceValue(TutorialAnchorKey.self) { anchors in
+            GeometryReader { proxy in
+                TutorialOverlay(anchors: anchors, proxy: proxy)
+            }
+            .allowsHitTesting(tutorial.isActive)
+        }
     }
 
     // MARK: - Sidebar
@@ -49,14 +87,24 @@ struct SettingsView: View {
             Section("General") {
                 Label("Glances", systemImage: "square.grid.2x2")
                     .tag(Self.glancesSelection)
+                    .tutorialAnchor(SettingsSection.glances)
                 Label("Shortcuts", systemImage: "command")
                     .tag(Self.shortcutsSelection)
+                    .tutorialAnchor(SettingsSection.shortcuts)
                 Label("Quick Switch", systemImage: "rectangle.stack")
                     .tag(Self.quickSwitchSelection)
+                    .tutorialAnchor(SettingsSection.quickSwitch)
             }
 
             Section("Glances") {
-                ForEach(registry.orderedPlugins, id: \.id) { plugin in
+                // Enabled first, then disabled; alphabetical by title within each
+                // group — so the sidebar mirrors the enable grouping on the
+                // Glances page but reads in a predictable A–Z order.
+                let byTitle: (any GlancePlugin, any GlancePlugin) -> Bool = {
+                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                ForEach(registry.enabledPluginsInOrder.sorted(by: byTitle)
+                    + registry.disabledPluginsInOrder.sorted(by: byTitle), id: \.id) { plugin in
                     Label(plugin.title, systemImage: plugin.iconSystemName)
                         // Dim the disabled ones: their settings stay reachable,
                         // but the sidebar shows at a glance what's turned off.
@@ -105,38 +153,69 @@ struct SettingsView: View {
 
     private var glancesPage: some View {
         VStack(alignment: .leading, spacing: 8) {
+            updateRow
+
+            Divider()
+
             Text("Enable and reorder glances. Order controls the popover layout.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            // Two groups rather than one mixed list: the enabled order is the
+            // only one that shows up in the popover, so dragging is worth doing
+            // among those rows alone. A disabled glance keeps its slot behind the
+            // scenes and returns to it when switched back on.
             List {
-                ForEach(registry.orderedPlugins, id: \.id) { plugin in
-                    HStack {
-                        Image(systemName: "line.3.horizontal")
-                            .foregroundStyle(.tertiary)
-                        Label(plugin.title, systemImage: plugin.iconSystemName)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { registry.isEnabled(plugin.id) },
-                            set: { newValue in
-                                registry.setEnabled(plugin.id, newValue)
+                if !registry.enabledPluginsInOrder.isEmpty {
+                    Section("Enabled") {
+                        ForEach(registry.enabledPluginsInOrder, id: \.id, content: row)
+                            .onMove { offsets, dest in
+                                registry.move(enabled: true, fromOffsets: offsets, toOffset: dest)
                                 coordinator.reconcile()
                             }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
                     }
                 }
-                .onMove { offsets, dest in
-                    registry.move(fromOffsets: offsets, toOffset: dest)
-                    coordinator.reconcile()
+
+                if !registry.disabledPluginsInOrder.isEmpty {
+                    Section("Disabled") {
+                        ForEach(registry.disabledPluginsInOrder, id: \.id, content: row)
+                            .onMove { offsets, dest in
+                                registry.move(enabled: false, fromOffsets: offsets, toOffset: dest)
+                            }
+                    }
                 }
             }
             .frame(minHeight: 300)
 
-            Divider()
+            // Re-runnable entry point for the guided tour, so it isn't a
+            // first-launch-only thing the user can never see again.
+            HStack {
+                Spacer()
+                Button {
+                    tutorial.start()
+                } label: {
+                    Label("Show tutorial", systemImage: "sparkles")
+                }
+                .buttonStyle(.link)
+            }
+        }
+    }
 
-            updateRow
+    private func row(_ plugin: any GlancePlugin) -> some View {
+        HStack {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+            Label(plugin.title, systemImage: plugin.iconSystemName)
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { registry.isEnabled(plugin.id) },
+                set: { newValue in
+                    registry.setEnabled(plugin.id, newValue)
+                    coordinator.reconcile()
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
         }
     }
 
@@ -150,7 +229,14 @@ struct SettingsView: View {
             }
             .disabled(isUpdateBusy)
 
-            if isUpdateBusy {
+            // A determinate bar only once the server has told us how many bytes
+            // are coming; a spinner covers the check and the sizeless download,
+            // where there is no fraction to draw.
+            if case .downloading(let progress?) = updater.phase {
+                ProgressView(value: progress)
+                    .controlSize(.small)
+                    .frame(width: 90)
+            } else if isUpdateBusy {
                 ProgressView()
                     .controlSize(.small)
             }
@@ -174,6 +260,9 @@ struct SettingsView: View {
         switch updater.phase {
         case .idle: return "Version \(updater.currentVersion)"
         case .checking: return "Checking for updates…"
+        // No percentage when the response carried no Content-Length: the bytes
+        // are arriving, but nothing here knows how many are left.
+        case .downloading(let progress?): return "Downloading update… \(Int(progress * 100))%"
         case .downloading: return "Downloading update…"
         case .upToDate: return "You're on the latest version (\(updater.currentVersion))"
         case .downloaded(let url): return "Downloaded to \(url.lastPathComponent)"
