@@ -28,6 +28,8 @@ private struct AIChatBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            header
+
             transcript
 
             if let error = conversation.lastError {
@@ -42,23 +44,60 @@ private struct AIChatBody: View {
                 AIUnconfiguredHint()
             }
         }
+        // Fill the container so the transcript takes the slack and the composer
+        // pins to the bottom, instead of everything bunching at the top.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    // MARK: Header
+
+    /// A slim top bar whose one job is starting a fresh chat. "New Chat" clears
+    /// the transcript and any error via `conversation.clear()` — the same action
+    /// that cleans up the current chat, so there's a single, unambiguous control
+    /// rather than a separate "clear" that would do the same thing.
+    private var header: some View {
+        HStack(spacing: 6) {
+            Spacer(minLength: 0)
+            Button {
+                conversation.clear()
+                draft = ""
+            } label: {
+                Label("New Chat", systemImage: "square.and.pencil")
+                    .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!hasChat)
+            .help("Start a new chat — clears the current one")
+        }
+    }
+
+    /// Whether there's anything to clear: messages, an in-flight reply, or a
+    /// lingering error. Keeps "New Chat" disabled on an already-empty transcript.
+    private var hasChat: Bool {
+        !conversation.messages.isEmpty || conversation.isResponding || conversation.lastError != nil
     }
 
     // MARK: Transcript
 
+    @ViewBuilder
     private var transcript: some View {
+        // An empty, idle chat centers its hint in the freed space; once there are
+        // messages (or a reply is landing) the scrolling transcript takes over.
+        if conversation.messages.isEmpty && !conversation.isResponding {
+            AITranscriptEmptyState()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            scrollingTranscript
+        }
+    }
+
+    private var scrollingTranscript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if conversation.messages.isEmpty {
-                        AITranscriptEmptyState()
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 24)
-                    } else {
-                        ForEach(conversation.messages) { message in
-                            AIMessageRow(message: message)
-                                .id(message.id)
-                        }
+                    ForEach(conversation.messages) { message in
+                        AIMessageRow(message: message)
+                            .id(message.id)
                     }
 
                     if conversation.isResponding {

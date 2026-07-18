@@ -31,6 +31,10 @@ final class AIPlugin: GlancePlugin {
     /// enough for readable bubbles. Comparable to Notes' 660×640 two-pane.
     var preferredToolWindowSize: CGSize? { CGSize(width: 460, height: 620) }
 
+    /// The chat owns its vertical layout — transcript fills, composer pins to the
+    /// bottom — so it fills the tool window instead of being scroll-wrapped.
+    var fillsToolWindow: Bool { true }
+
     func popoverSection() -> AnyView { AnyView(AIChatView(conversation: conversation)) }
     func settingsSection() -> AnyView { AnyView(AISettingsView()) }
 }

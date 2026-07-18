@@ -46,6 +46,12 @@ protocol GlancePlugin: AnyObject {
     /// Return `nil` to use the default. A glance with a real editing surface
     /// (e.g. Notes) can ask for more room; most glances don't need to.
     var preferredToolWindowSize: CGSize? { get }
+
+    /// Whether the glance manages its own vertical layout and should fill the
+    /// tool window rather than being wrapped in the default scroll-to-fit chrome.
+    /// Return `true` for a glance that pins content to the window edges — e.g. a
+    /// chat that keeps its composer at the bottom. Default: `false`.
+    var fillsToolWindow: Bool { get }
 }
 
 extension GlancePlugin {
@@ -53,4 +59,5 @@ extension GlancePlugin {
     var refreshInterval: TimeInterval { 0 }
     var requiredPermissions: [GlancePermission] { [] }
     var preferredToolWindowSize: CGSize? { nil }
+    var fillsToolWindow: Bool { false }
 }
