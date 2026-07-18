@@ -78,7 +78,23 @@ struct AIProvider: Identifiable, Hashable {
                    apiKeysURL: "https://console.mistral.ai/api-keys"),
         AIProvider(id: "openrouter", name: "OpenRouter", kind: .openAICompatible,
                    defaultBaseURL: "https://openrouter.ai/api/v1",
-                   models: ["anthropic/claude-sonnet-5", "openai/gpt-4o", "google/gemini-2.5-pro"],
+                   models: [
+                       // Paid flagships.
+                       "anthropic/claude-sonnet-5",
+                       "openai/gpt-4o",
+                       "google/gemini-2.5-pro",
+                       // Free tier (":free"; openrouter/free rotates across them).
+                       // See https://openrouter.ai/openrouter/free
+                       "openrouter/free",
+                       "meta-llama/llama-3.3-70b-instruct:free",
+                       "qwen/qwen3-coder:free",
+                       "qwen/qwen3-next-80b-a3b-instruct:free",
+                       "openai/gpt-oss-20b:free",
+                       "nvidia/nemotron-3-super-120b-a12b:free",
+                       "nousresearch/hermes-3-llama-3.1-405b:free",
+                       "google/gemma-4-31b-it:free",
+                       "meta-llama/llama-3.2-3b-instruct:free",
+                   ],
                    requiresBaseURL: false, requiresAPIKey: true,
                    apiKeysURL: "https://openrouter.ai/keys"),
         AIProvider(id: "ollama", name: "Ollama (local)", kind: .openAICompatible,
