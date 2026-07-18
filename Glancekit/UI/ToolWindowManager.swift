@@ -57,15 +57,22 @@ final class ToolWindowManager {
     /// tool's own window rather than losing the nav bar's strip to it.
     private static let quickSwitchNavBarHeight: CGFloat = 44
 
-    /// The Quick Switch window follows the *selected* tool's own window in
-    /// everything, size included: the tool's preferred size (its single-window
-    /// size) plus the nav bar strip. So switching resizes the window to match
-    /// whichever glance is on screen — a width-responsive glance (Colors' two-pane,
-    /// Notes') always gets the width its own window would give it, and never
-    /// collapses to a different, narrower version.
-    private func quickSwitchWindowSize(for plugin: any GlancePlugin) -> CGSize {
-        let base = plugin.preferredToolWindowSize ?? Self.defaultToolWindowSize
-        return CGSize(width: base.width, height: base.height + Self.quickSwitchNavBarHeight)
+    /// One size that fits *every* tool in the window: the widest preferred width
+    /// and the tallest preferred height across the ring (plus the pinned
+    /// Assistant), plus the nav bar strip.
+    ///
+    /// Sizing to the max — rather than to the selected tool — is deliberate: the
+    /// window must NOT change size while you switch tools. Fitting them all at
+    /// once keeps it fixed across every switch while still giving a width-responsive
+    /// glance (Colors' two-pane, Notes') the room its own window would, so none
+    /// ever collapses to a narrower layout. Recomputed only when the window opens.
+    private func quickSwitchUnifiedSize() -> CGSize {
+        let sizes = quickSwitchModel.allTools.map {
+            $0.preferredToolWindowSize ?? Self.defaultToolWindowSize
+        }
+        let width = sizes.map(\.width).max() ?? Self.defaultToolWindowSize.width
+        let height = sizes.map(\.height).max() ?? Self.defaultToolWindowSize.height
+        return CGSize(width: width, height: height + Self.quickSwitchNavBarHeight)
     }
 
     /// Nesting depth of `suspendAutoClose()` calls. A count rather than a flag
@@ -73,15 +80,7 @@ final class ToolWindowManager {
     /// the first one to finish re-arm auto-close under the other.
     private var autoCloseSuspensions = 0
 
-    private init() {
-        // Resize the window to the newly-selected tool whenever the selection
-        // changes — whether from a nav-bar click (the view sets `selectedID`) or
-        // the shortcut (`advance()`), both routed through the model — so the
-        // window always matches that tool's own single-window size.
-        quickSwitchModel.onSelectionChange = { [weak self] in
-            self?.fitQuickSwitchWindowToSelection()
-        }
-    }
+    private init() {}
 
     var isAutoCloseSuspended: Bool { autoCloseSuspensions > 0 }
 
@@ -123,8 +122,8 @@ final class ToolWindowManager {
         quickSwitchModel.switchShortcut = shortcut
 
         if let window = windows[Self.quickSwitchWindowID], window.isVisible {
-            // `advance()` resizes the window to the new tool via the selection
-            // callback; just bring it back to front.
+            // Just advance the selection and re-front — the window keeps its size,
+            // so switching never resizes it.
             quickSwitchModel.advance()
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
@@ -134,13 +133,13 @@ final class ToolWindowManager {
         showQuickSwitchWindow()
     }
 
-    /// Brings the unified Quick Switch window to front at the mouse, creating it
-    /// on first use and sizing it to the selected tool. The selection is already
-    /// set on `quickSwitchModel`.
+    /// Brings the unified Quick Switch window to front at the mouse, creating it on
+    /// first use. Sized to fit every tool at once (see `quickSwitchUnifiedSize`),
+    /// recomputed here — on open — so a changed ring is reflected without ever
+    /// resizing mid-switch. The selection is already set on `quickSwitchModel`.
     private func showQuickSwitchWindow() {
         let id = Self.quickSwitchWindowID
-        let size = quickSwitchModel.current.map { quickSwitchWindowSize(for: $0) }
-            ?? Self.defaultToolWindowSize
+        let size = quickSwitchUnifiedSize()
         let window = windows[id] ?? makeQuickSwitchWindow(size: size)
         windows[id] = window
         lastShownPluginID = id
@@ -149,19 +148,6 @@ final class ToolWindowManager {
         window.setFrameOrigin(originNearMouse(for: window.frame.size))
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-    }
-
-    /// Resizes the open Quick Switch window to the selected tool's own window
-    /// size, keeping the top-left corner fixed so it grows/shrinks downward rather
-    /// than jumping (NSWindow otherwise pins the bottom-left on a resize).
-    private func fitQuickSwitchWindowToSelection() {
-        guard let window = windows[Self.quickSwitchWindowID], window.isVisible,
-              let plugin = quickSwitchModel.current else { return }
-
-        let size = quickSwitchWindowSize(for: plugin)
-        let topLeft = NSPoint(x: window.frame.minX, y: window.frame.maxY)
-        window.setContentSize(size)
-        window.setFrameTopLeftPoint(topLeft)
     }
 
     /// Brings the given glance's tool window to front at the current mouse

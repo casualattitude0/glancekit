@@ -27,18 +27,7 @@ import SwiftUI
 final class QuickSwitchModel {
     private(set) var ring: [any GlancePlugin] = []
 
-    var selectedID: String? {
-        didSet {
-            guard oldValue != selectedID else { return }
-            onSelectionChange?()
-        }
-    }
-
-    /// Fired when the on-screen tool changes — from a nav-bar click or from
-    /// `advance()` — so `ToolWindowManager` can resize the window to that tool's
-    /// own single-window size. `@ObservationIgnored`: it's plumbing, not view
-    /// state, and must not itself invalidate the SwiftUI body.
-    @ObservationIgnored var onSelectionChange: (() -> Void)?
+    var selectedID: String?
 
     /// The AI Assistant, pinned separately from the ring so it's reachable from
     /// any tool regardless of ring configuration — the "get help, then get back"
@@ -64,6 +53,12 @@ final class QuickSwitchModel {
             if let assistant, assistant.id == selectedID { return assistant }
         }
         return ring.first
+    }
+
+    /// Every tool the window can show — the ring plus the pinned Assistant. Used
+    /// to size the window to fit them all at once, so it never resizes on a switch.
+    var allTools: [any GlancePlugin] {
+        ring + (assistant.map { [$0] } ?? [])
     }
 
     /// Whether the Assistant is the tool on screen.
