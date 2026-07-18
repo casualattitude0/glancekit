@@ -70,6 +70,10 @@ final class PowerPlugin: GlancePlugin {
     var showSummary: Bool {
         didSet { UserDefaults.standard.set(showSummary, forKey: "glancekit.power.showSummary") }
     }
+    /// A single actionable suggestion to improve battery longevity/usage.
+    var showTip: Bool {
+        didSet { UserDefaults.standard.set(showTip, forKey: "glancekit.power.showTip") }
+    }
     /// Percentage at/below which a discharging battery earns an urgent signal.
     var lowThreshold: Int {
         didSet { UserDefaults.standard.set(lowThreshold, forKey: "glancekit.power.lowThreshold") }
@@ -112,6 +116,7 @@ final class PowerPlugin: GlancePlugin {
         showCapacity = d.object(forKey: "glancekit.power.showCapacity") as? Bool ?? false
         showTimeOnBattery = d.object(forKey: "glancekit.power.showTimeOnBattery") as? Bool ?? true
         showSummary = d.object(forKey: "glancekit.power.showSummary") as? Bool ?? true
+        showTip = d.object(forKey: "glancekit.power.showTip") as? Bool ?? true
         lowThreshold = d.object(forKey: "glancekit.power.lowThreshold") as? Int ?? 10
 
         let savedWindow = d.object(forKey: "glancekit.power.historyWindow") as? Int ?? 120
@@ -157,6 +162,52 @@ final class PowerPlugin: GlancePlugin {
               snapshot.powerSource == .battery,
               let start = unplugDate else { return nil }
         return max(0, Date().timeIntervalSince(start))
+    }
+
+    /// A single, actionable suggestion for improving battery longevity or
+    /// stretching the current charge, chosen from the live snapshot. Ordered
+    /// most-pressing first so the popover always shows the one thing most worth
+    /// doing right now. `nil` when nothing useful applies (or no battery).
+    var batteryTip: String? {
+        guard snapshot.hasBattery else { return nil }
+
+        // Hardware concerns first — these outweigh any charging-habit advice.
+        if snapshot.healthIsDegraded {
+            return "Battery health is low. An Apple service check can restore full capacity."
+        }
+        if let t = snapshot.temperatureC, t >= Double(overheatThreshold) {
+            return "Battery is running warm. Move it off direct heat and quit heavy apps — sustained heat ages the cell."
+        }
+
+        // Sitting plugged in at 100% keeps the cell at peak voltage, which wears
+        // it faster than cycling in the middle of its range.
+        if snapshot.powerSource == .ac,
+           snapshot.state == .charged || snapshot.percentage == 100 {
+            return "Fully charged on AC. Unplug, or turn on Optimized Battery Charging, to reduce long-term wear."
+        }
+
+        // Draining hard on battery: trim the load to stretch the remaining charge.
+        if snapshot.state == .discharging, let w = snapshot.powerWatts, w <= -20 {
+            return "High power draw. Lower screen brightness and quit background apps to extend runtime."
+        }
+
+        // Low, but not yet at the urgent threshold — nudge before it bites.
+        if snapshot.state == .discharging, let pct = snapshot.percentage,
+           pct > lowThreshold, pct <= lowThreshold + 10 {
+            return "Charge is getting low. Plug in soon to stay above \(lowThreshold)%."
+        }
+
+        // An aging cell: not urgent, but worth planning for.
+        if let cycles = snapshot.cycleCount, cycles >= 800 {
+            return "\(cycles) charge cycles logged (rated ~1000). Capacity will keep tapering — plan for an eventual replacement."
+        }
+
+        // Healthy and topped up on AC: a general longevity nudge.
+        if snapshot.powerSource == .ac, let pct = snapshot.percentage, pct >= 80 {
+            return "Keeping day-to-day charge between 20–80% slows battery wear over time."
+        }
+
+        return nil
     }
 
     /// Track the unplug instant: set it the moment we move onto battery, clear
@@ -292,6 +343,9 @@ private struct PowerPopover: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if plugin.showTip, let tip = plugin.batteryTip {
+                    tipBanner(tip)
+                }
                 Divider()
                 detailsGrid
                 if plugin.history.count > 1 {
@@ -373,6 +427,22 @@ private struct PowerPopover: View {
         if let h = snap.healthPercent { parts.append("\(h)% health") }
         if let c = snap.cycleCount { parts.append("\(c) cycles") }
         return parts.joined(separator: " · ")
+    }
+
+    /// A subtle, tinted card carrying the one actionable battery-usage tip.
+    private func tipBanner(_ tip: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "lightbulb.fill")
+                .font(.caption)
+                .foregroundStyle(.yellow)
+            Text(tip)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var detailsGrid: some View {
@@ -599,6 +669,7 @@ private struct PowerSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             Toggle("Health at a glance summary", isOn: $plugin.showSummary)
+            Toggle("Battery usage suggestion", isOn: $plugin.showTip)
             Toggle("Battery health %", isOn: $plugin.showHealth)
             Toggle("Cycle count", isOn: $plugin.showCycles)
             Toggle("Temperature", isOn: $plugin.showTemperature)
