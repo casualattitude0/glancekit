@@ -112,11 +112,13 @@ final class ToolWindowManager {
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// Bottom-left origin placing a window of `size` just below-right of the
-    /// cursor, kept wholly within the visible frame of the screen under it.
+    /// Bottom-left origin placing a window of `size` centered on the cursor, so
+    /// the mouse lands at the window's middle. Kept wholly within the visible
+    /// frame of the screen under the cursor, so it never opens half off an edge
+    /// or under the menu bar.
     ///
     /// Screen coordinates are y-up with the origin at the bottom-left of the
-    /// main display, so "below the cursor" means subtracting the height.
+    /// main display, so centering means offsetting the origin by half the size.
     private func originNearMouse(for size: NSSize) -> NSPoint {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) }
@@ -124,11 +126,8 @@ final class ToolWindowManager {
         // No screens at all is not a real state, but it is a representable one.
         guard let visible = screen?.visibleFrame else { return mouse }
 
-        // A small offset keeps the cursor off the titlebar, so the press that
-        // opened the window doesn't leave the pointer poised to drag it.
-        let offset: CGFloat = 12
-        let x = mouse.x + offset
-        let y = mouse.y - offset - size.height
+        let x = mouse.x - size.width / 2
+        let y = mouse.y - size.height / 2
 
         // `max` last: if the window is bigger than the screen, pinning the
         // left/bottom edge beats pinning the right/top and hiding the controls.
