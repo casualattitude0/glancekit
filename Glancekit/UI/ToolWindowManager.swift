@@ -76,13 +76,22 @@ final class ToolWindowManager {
         guard let current = visiblePluginID,
               let index = plugins.firstIndex(where: { $0.id == current })
         else {
-            // Nothing up, or what's up isn't in the ring: start at the top.
+            // Nothing up, or what's up isn't in the ring: resume where the ring
+            // last left off. `lastShownPluginID` still holds the glance whose
+            // window was closed most recently, so reopening it picks the ring
+            // back up where the user left it rather than snapping to the top.
+            // Falls back to the top when that glance has since dropped out of
+            // the ring (disabled or excluded), or on a first-ever switch.
+            //
             // A window that is up but out of the ring still has to be closed
             // here — it is floating, and once it resigns key to the window we
             // are about to show it will never fire `windowDidResignKey` again,
             // so nothing else would ever take it off the screen.
             if let current = visiblePluginID { close(pluginID: current) }
-            show(plugin: plugins[0])
+            let resume = lastShownPluginID.flatMap { id in
+                plugins.first { $0.id == id }
+            }
+            show(plugin: resume ?? plugins[0])
             return
         }
 
