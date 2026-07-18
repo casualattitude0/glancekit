@@ -50,7 +50,7 @@ enum ShortcutAction: Hashable, Identifiable {
         case .quickSwitch:
             GlobalShortcut(keyCode: UInt16(kVK_Tab), modifiers: [.option])
         case .settings:
-            GlobalShortcut(keyCode: UInt16(kVK_ANSI_Grave), modifiers: [.option])
+            GlobalShortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.option])
         case .openMenubar:
             GlobalShortcut(keyCode: UInt16(kVK_ANSI_M), modifiers: [.option])
         case .glance(let pluginID):
