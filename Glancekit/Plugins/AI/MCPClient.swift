@@ -93,6 +93,11 @@ actor MCPSession {
     private var stdoutBuffer = Data()
     /// Rolling capture of the child's stderr, for error messages.
     private var stderrBuffer = Data()
+    /// Serializes stdout chunks into a single ordered consumer, so newline-frame
+    /// reassembly can't be corrupted by out-of-order delivery. The readability
+    /// handler yields into this; one reader `Task` drains it in FIFO order.
+    private var stdoutContinuation: AsyncStream<Data>.Continuation?
+    private var stdoutReaderTask: Task<Void, Never>?
 
     // http-only
     private var httpSession: URLSession?
@@ -216,6 +221,12 @@ actor MCPSession {
         // fire against a torn-down pipe.
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
+
+        // End the ordered stdout channel and its reader.
+        stdoutContinuation?.finish()
+        stdoutContinuation = nil
+        stdoutReaderTask?.cancel()
+        stdoutReaderTask = nil
 
         if let process, process.isRunning {
             process.terminationHandler = nil
@@ -369,11 +380,23 @@ actor MCPSession {
         proc.standardOutput = outPipe
         proc.standardError = errPipe
 
-        // Stream stdout: append to buffer, then drain complete newline frames.
-        outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // Stream stdout through one ordered channel: the readability handler
+        // (invoked serially on its own queue) yields chunks into an AsyncStream,
+        // and a single reader Task drains them in FIFO order into `ingestStdout`.
+        // A per-chunk `Task` would let chunks hop onto the actor out of order and
+        // corrupt a JSON frame that spans a read boundary.
+        var stdoutContinuation: AsyncStream<Data>.Continuation!
+        let stdoutStream = AsyncStream<Data>(bufferingPolicy: .unbounded) { stdoutContinuation = $0 }
+        let continuation = stdoutContinuation!
+        self.stdoutContinuation = continuation
+        outPipe.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            guard !chunk.isEmpty, let self else { return }
-            Task { await self.ingestStdout(chunk) }
+            if !chunk.isEmpty { continuation.yield(chunk) }
+        }
+        self.stdoutReaderTask = Task { [weak self] in
+            for await chunk in stdoutStream {
+                await self?.ingestStdout(chunk)
+            }
         }
         // Capture stderr for diagnostics; never let it crash us.
         errPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
