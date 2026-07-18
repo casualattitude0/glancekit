@@ -1,16 +1,90 @@
 import SwiftUI
 
-/// The popover window shown when the menu-bar item is clicked. Stacks each
-/// enabled plugin's `popoverSection()` in the user's chosen order, with a
-/// header row (refresh + settings + quit).
+/// The popover window shown when the menu-bar item is clicked.
+///
+/// Two layouts share this window, chosen by the `Smart Panel` preference
+/// (`MenuPanelSettings`, default on):
+///   • `SmartPanelView` — the dynamic feed that surfaces only the glances that
+///     need attention right now, with the Assistant and Notes pinned.
+///   • `ClassicPanelView` — every enabled plugin's `popoverSection()` stacked
+///     side by side in the user's chosen order.
 struct PopoverRootView: View {
+    @Environment(MenuPanelSettings.self) private var settings
+
+    var body: some View {
+        if settings.useSmartPanel {
+            SmartPanelView()
+        } else {
+            ClassicPanelView()
+        }
+    }
+}
+
+// MARK: - Shared header
+
+/// The header row shared by both panel layouts: title, refresh, settings, quit.
+struct PanelHeader: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(RefreshCoordinator.self) private var coordinator
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        HStack {
+            Text("Glancekit")
+                .font(.headline)
+            Spacer()
+
+            Button {
+                coordinator.refreshAllNow()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("Refresh all")
+
+            Button {
+                openSettingsWindow()
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
+            .keyboardShortcut(",", modifiers: .command)
+
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+            }
+            .buttonStyle(.borderless)
+            .help("Quit Glancekit")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// Open the Settings window on the Glances tab.
+    private func openSettingsWindow() {
+        registry.settingsSelection = nil
+        // The menu-bar popover is the key window at click time; capture it now so
+        // we can dismiss it once Settings is open.
+        let popover = NSApp.keyWindow
+        SettingsWindowPresenter.present { openSettings() }
+        popover?.close()
+    }
+}
+
+// MARK: - Classic layout
+
+/// The original layout: stacks each enabled plugin's `popoverSection()` in the
+/// user's chosen order, scrolling horizontally.
+struct ClassicPanelView: View {
+    @Environment(PluginRegistry.self) private var registry
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
         VStack(spacing: 0) {
-            header
+            PanelHeader()
 
             Divider()
 
@@ -53,48 +127,11 @@ struct PopoverRootView: View {
         }
     }
 
-    /// Open the Settings window, deep-linking to `pluginID` (nil = Glances tab).
+    /// Open the Settings window, deep-linking to `pluginID`.
     private func openSettings(for pluginID: String?) {
         registry.settingsSelection = pluginID
-        // The menu-bar popover is the key window at click time; capture it now so
-        // we can dismiss it once Settings is open.
         let popover = NSApp.keyWindow
         SettingsWindowPresenter.present { openSettings() }
         popover?.close()
-    }
-
-    private var header: some View {
-        HStack {
-            Text("Glancekit")
-                .font(.headline)
-            Spacer()
-
-            Button {
-                coordinator.refreshAllNow()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .help("Refresh all")
-
-            Button {
-                openSettings(for: nil)
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
-            .help("Settings")
-            .keyboardShortcut(",", modifiers: .command)
-
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-            }
-            .buttonStyle(.borderless)
-            .help("Quit Glancekit")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 }

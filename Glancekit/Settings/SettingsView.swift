@@ -31,6 +31,7 @@ struct SettingsView: View {
     @Environment(RefreshCoordinator.self) private var coordinator
     @Environment(UpdateChecker.self) private var updater
     @Environment(TutorialController.self) private var tutorial
+    @Environment(MenuPanelSettings.self) private var panelSettings
 
     /// Sentinel `settingsSelection` values for the pages that aren't a plugin's
     /// own section. `registry.settingsSelection` uses `nil` for the Glances page
@@ -174,6 +175,10 @@ struct SettingsView: View {
 
             Divider()
 
+            menuPanelRow
+
+            Divider()
+
             Text("Enable and reorder glances. Order controls the popover layout.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -233,6 +238,24 @@ struct SettingsView: View {
             ))
             .labelsHidden()
             .toggleStyle(.switch)
+        }
+    }
+
+    /// The Smart Panel toggle: the app-wide choice between the dynamic feed and
+    /// the classic side-by-side layout for the menu-bar panel.
+    private var menuPanelRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(
+                get: { panelSettings.useSmartPanel },
+                set: { panelSettings.useSmartPanel = $0 }
+            )) {
+                Text("Smart Panel")
+            }
+            .toggleStyle(.switch)
+
+            Text("Automatically surface the glances that need attention — high memory, a big market move, unread GitHub notifications, and more. Turn off to show every enabled glance in a row instead. The Assistant and Notes stay pinned either way.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
