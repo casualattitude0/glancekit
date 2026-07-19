@@ -1,6 +1,11 @@
 import Foundation
 
 /// A single stock quote plus an optional intraday series for the sparkline.
+///
+/// The fields below `series` are all optional additions carrying detail only
+/// some sources provide — the Taiwan MIS feed fills them in, Yahoo and Finnhub
+/// leave them nil. They default, so every existing construction site still
+/// compiles unchanged.
 struct StockQuote: Identifiable, Equatable {
     let symbol: String
     var price: Double
@@ -8,6 +13,18 @@ struct StockQuote: Identifiable, Equatable {
     var currency: String
     /// Intraday closes, oldest → newest, used to draw the sparkline.
     var series: [Double]
+
+    /// Display name from the exchange, e.g. 台積電. Nil when the source has none.
+    var name: String? = nil
+    /// Accumulated volume for the session, in 張 (lots). The plan's volume
+    /// conditions are all quoted in 張, so it's stored in that unit, not shares.
+    var volumeLots: Double? = nil
+    var open: Double? = nil
+    var dayHigh: Double? = nil
+    var dayLow: Double? = nil
+    /// When the exchange says this quote was struck (not when we fetched it) —
+    /// the difference matters for telling a live tick from a stale one.
+    var quotedAt: Date? = nil
 
     var id: String { symbol }
     var change: Double { price - previousClose }
