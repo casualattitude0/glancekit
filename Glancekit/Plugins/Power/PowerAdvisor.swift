@@ -23,11 +23,16 @@ enum PowerAdvisor {
         /// Observed discharge rate in percent-per-hour over the most recent
         /// uninterrupted on-battery stretch. `nil` until there is enough data.
         var drainPerHour: Double?
-        /// Roughly how many charge sessions happen per day, from the number of
-        /// rising edges in the history. `nil` when the span is too short.
+        /// Roughly how many charge sessions happen per day, derived from the
+        /// long-horizon charge-session log (not the sparkline samples, which
+        /// span only ~1 hour). `nil` when the log is too short to mean anything.
         var chargesPerDay: Double?
-        /// Total wall-clock span the history covers, in hours.
+        /// Total observed span the *drain* samples cover, in hours.
         var spanHours: Double = 0
+        /// Wall-clock span of the charge-session log behind `chargesPerDay`, in
+        /// hours. This is the multi-day/-week horizon the sparkline can't reach,
+        /// so it — not `spanHours` — gates any long-term projection.
+        var chargeLogSpanHours: Double = 0
 
         /// A heavy user drains fast *and* charges often — both push the advice
         /// toward earlier warnings and a stricter charge ceiling.
@@ -38,16 +43,29 @@ enum PowerAdvisor {
         }
     }
 
-    /// Derive a usage profile from timestamped percentage samples (oldest first).
+    /// Derive a usage profile from timestamped percentage samples (oldest first)
+    /// plus a separate, long-horizon log of charge-session start times.
     ///
     /// - The drain rate uses only the most recent *monotonically non-rising*
     ///   stretch, so a charge in the middle of the window never dilutes it.
     /// - Samples more than `maxGap` apart are treated as separate sessions (the
     ///   Mac was asleep or the app was quit), because the elapsed wall time did
     ///   not correspond to real discharge.
+    /// - Charge cadence comes from `chargeLog`, not the samples: the retained
+    ///   sparkline history spans at most ~1 hour of observed time, far short of
+    ///   the days/weeks needed for a "charges per day" figure to mean anything.
+    ///   `chargeLog` is the persisted list of rising-edge timestamps (oldest
+    ///   first, though it is sorted defensively here).
     static func usageProfile(from samples: [(percent: Int, time: Date)],
+                             chargeLog: [Date] = [],
                              maxGap: TimeInterval = 20 * 60) -> UsageProfile {
         var profile = UsageProfile()
+
+        if let cadence = chargeCadence(from: chargeLog) {
+            profile.chargesPerDay = cadence.perDay
+            profile.chargeLogSpanHours = cadence.spanHours
+        }
+
         guard samples.count >= 2 else { return profile }
 
         // Observed time only: the sum of gaps we actually watched, not raw
@@ -84,20 +102,31 @@ enum PowerAdvisor {
             profile.drainPerHour = dropped / hours
         }
 
-        // --- Charge frequency: count rising edges across the whole history.
-        var risingEdges = 0
-        var wasRising = false
-        for j in 1..<samples.count {
-            let gap = samples[j].time.timeIntervalSince(samples[j - 1].time)
-            let rising = samples[j].percent > samples[j - 1].percent && gap <= maxGap
-            if rising && !wasRising { risingEdges += 1 }
-            wasRising = rising
-        }
-        if profile.spanHours >= 6 {
-            profile.chargesPerDay = Double(risingEdges) / (profile.spanHours / 24)
-        }
-
         return profile
+    }
+
+    /// Charge frequency, learned from a persisted log of charge-session start
+    /// times rather than the sparkline samples. Returns the estimated sessions
+    /// per day and the log's wall-clock span in hours, or `nil` when the log is
+    /// too short or too clustered to support a rate.
+    ///
+    /// - `minSpan` guards against a freshly-seeded log: two edges an hour apart
+    ///   must not read as "24 charges a day". A rate is only offered once the
+    ///   log covers at least this much wall time.
+    /// - The rate uses `count − 1` over the first-to-last span: N timestamped
+    ///   edges bound N−1 completed inter-charge intervals, the least-biased
+    ///   estimator when the observation window's true edges are unknown. Unlike
+    ///   drain, this is honest wall clock — discrete charge events carry no
+    ///   "unobserved discharge" hazard to net out, so an overnight gap between
+    ///   two charges is real elapsed time the cadence should count.
+    static func chargeCadence(from chargeLog: [Date],
+                              minSpan: TimeInterval = 12 * 3600) -> (perDay: Double, spanHours: Double)? {
+        let sorted = chargeLog.sorted()
+        guard sorted.count >= 2, let first = sorted.first, let last = sorted.last else { return nil }
+        let span = last.timeIntervalSince(first)
+        guard span >= minSpan else { return nil }
+        let perDay = Double(sorted.count - 1) / (span / 86_400)
+        return (perDay, span / 3600)
     }
 
     // MARK: - Advice
