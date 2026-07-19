@@ -19,6 +19,7 @@ import AppKit
 struct SmartPanelView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(SmartPanelHistory.self) private var history
+    @Environment(GlanceEmphasisStore.self) private var emphasis
 
     @State private var brief = SmartBriefModel()
 
@@ -33,19 +34,22 @@ struct SmartPanelView: View {
         let context = PanelContext()
         let ranked = rankedSignals(
             from: registry.enabledPluginsInOrder.filter { !Self.pinnedIDs.contains($0.id) },
-            cap: Self.cardCap
+            cap: Self.cardCap,
+            emphasis: { emphasis.emphasis(for: $0) }
         )
         let deltas = Dictionary(uniqueKeysWithValues: ranked.map {
             ($0.plugin.id, history.delta(id: $0.plugin.id, headline: $0.signal.headline, score: $0.signal.score))
         })
         let briefItems = ranked.map { item in
             (title: item.plugin.title, headline: item.signal.headline, detail: item.signal.detail,
-             priority: item.signal.priority, isNew: deltas[item.plugin.id]?.isNew ?? false)
+             priority: item.effectivePriority, isNew: deltas[item.plugin.id]?.isNew ?? false)
         }
         // Coarse key: which glances and how urgent (plus novelty) — NOT their live
         // numbers — so the brief holds still while a price or percentage ticks.
+        // Emphasis rides along inside the effective priority, so changing a
+        // glance's weight in Settings rewrites the brief on the next open.
         let signature = ranked.map {
-            "\($0.plugin.id)|\($0.signal.priority.rawValue)|\(deltas[$0.plugin.id]?.isNew ?? false)"
+            "\($0.plugin.id)|\($0.effectivePriority.rawValue)|\(deltas[$0.plugin.id]?.isNew ?? false)"
         }.joined(separator: "~")
 
         VStack(spacing: 0) {
@@ -112,7 +116,18 @@ struct SmartPanelView: View {
 struct RankedSignal: Identifiable {
     let plugin: any GlancePlugin
     let signal: GlanceSignal
+    /// The user's emphasis for this glance, already folded into
+    /// `effectivePriority`. Kept around so a card can explain itself.
+    let emphasis: GlanceEmphasis
     @MainActor var id: String { plugin.id }
+
+    /// What the panel ranks, tints, and briefs by: the reported priority nudged
+    /// by the user's emphasis. Everything downstream reads this rather than
+    /// `signal.priority`, so a de-emphasised glance doesn't sort low but still
+    /// shout in red.
+    var effectivePriority: GlanceSignal.Priority {
+        signal.priority.emphasised(by: emphasis)
+    }
 }
 
 /// Rank the glances' current signals for the feed. Every glance that reports a
@@ -120,11 +135,24 @@ struct RankedSignal: Identifiable {
 /// the top and the quiet `ambient` readings fill in beneath them, up to `cap`.
 /// So the dynamic panel shows the full picture at a glance while still leading
 /// with what matters most.
+///
+/// `emphasis` is the user's per-glance weighting (see `GlanceEmphasisStore`); it
+/// shifts a glance's bucket before the sort, which is the only place ordering is
+/// decided — so raising one glance lowers everything else relative to it without
+/// any glance having to know the others exist.
 @MainActor
-func rankedSignals(from plugins: [any GlancePlugin], cap: Int) -> [RankedSignal] {
+func rankedSignals(
+    from plugins: [any GlancePlugin],
+    cap: Int,
+    emphasis: (String) -> GlanceEmphasis = { _ in .normal }
+) -> [RankedSignal] {
     plugins
-        .compactMap { plugin in plugin.currentSignal().map { RankedSignal(plugin: plugin, signal: $0) } }
-        .sorted { ($0.signal.priority, $0.signal.score) > ($1.signal.priority, $1.signal.score) }
+        .compactMap { plugin in
+            plugin.currentSignal().map {
+                RankedSignal(plugin: plugin, signal: $0, emphasis: emphasis(plugin.id))
+            }
+        }
+        .sorted { ($0.effectivePriority, $0.signal.score) > ($1.effectivePriority, $1.signal.score) }
         .prefix(cap)
         .map { $0 }
 }
@@ -161,7 +189,11 @@ private struct SignalCard: View {
 
     @State private var isHovering = false
 
-    private var accent: Color { ranked.signal.tint ?? priorityColor(ranked.signal.priority) }
+    /// Emphasis is folded in here too, not just in the sort: a glance the user
+    /// pushed down shouldn't keep the loud fallback tint of the row above it.
+    /// A signal that names its own `tint` still wins — that colour usually
+    /// carries meaning (green charging, red overheating) rather than urgency.
+    private var accent: Color { ranked.signal.tint ?? priorityColor(ranked.effectivePriority) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
