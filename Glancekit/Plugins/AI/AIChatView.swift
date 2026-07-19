@@ -190,7 +190,7 @@ private struct AIMessageRow: View {
         case .user:
             HStack {
                 Spacer(minLength: 32)
-                bubble(alignment: .trailing)
+                userBubble
                     .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
                     .foregroundStyle(.white)
             }
@@ -201,7 +201,16 @@ private struct AIMessageRow: View {
                         AIToolActivityList(activity: message.toolActivity)
                     }
                     if !message.text.isEmpty {
-                        bubble(alignment: .leading)
+                        // Only the assistant's side renders markdown: it's what
+                        // writes in markdown. Echoing the user's own typing back
+                        // restyled would be a surprise, and a stray asterisk in
+                        // a question shouldn't silently turn into italics.
+                        AIMarkdownText(text: message.text)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
                             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
@@ -210,11 +219,14 @@ private struct AIMessageRow: View {
         }
     }
 
-    private func bubble(alignment: TextAlignment) -> some View {
+    private var userBubble: some View {
         Text(message.text)
             .font(.callout)
             .textSelection(.enabled)
-            .multilineTextAlignment(alignment)
+            // The bubble sits right, but its text reads left: a ragged-left edge
+            // makes every line start in a different place, which costs more to
+            // read than the symmetry buys.
+            .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
