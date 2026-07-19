@@ -207,6 +207,12 @@ enum PowerAdvisor {
             floor += 5
         }
         ceiling = max(ceiling, 50)
+        // Re-clamp after the bumps, not just in the policy: the adjustments
+        // above push the floor up by as much as 15 while pulling the ceiling
+        // down by 10, so a degraded, high-cycle battery could end with the
+        // floor above the ceiling — "charge now" on battery, "unplug" on AC,
+        // and no state that satisfies either.
+        floor = min(floor, ceiling - 10)
 
         let pct = snapshot.percentage
         let hot = (snapshot.temperatureC ?? 0) >= Double(policy.overheatThreshold)

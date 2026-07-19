@@ -1086,7 +1086,10 @@ private struct PowerSettings: View {
             // Each end is bounded by the other, keeping a 10-point band
             // between them: floor above ceiling has no coherent meaning and
             // leaves the advisor with no resting state.
-            Stepper(value: $plugin.chargeCeiling, in: (plugin.chargeFloor + 10)...100, step: 5) {
+            // The 50 floor is what keeps the control honest: `advise` hard-clamps
+            // the ceiling to at least 50, so allowing a lower one here would show
+            // "Charge ceiling 35%" while the advisor quietly used 50.
+            Stepper(value: $plugin.chargeCeiling, in: max(50, plugin.chargeFloor + 10)...100, step: 5) {
                 Text("Charge ceiling \(plugin.chargeCeiling)%")
                     .font(.callout)
             }
