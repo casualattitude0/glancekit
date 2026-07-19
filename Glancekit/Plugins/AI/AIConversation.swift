@@ -101,7 +101,8 @@ final class AIConversation {
             endpoint: AIConfigStore.shared.effectiveEndpoint,
             apiKey: AIConfigStore.shared.apiKey,
             model: AIConfigStore.shared.model,
-            systemPrompt: AIConfigStore.shared.systemPrompt)
+            systemPrompt: AIConfigStore.shared.systemPrompt,
+            maxOutputTokens: AIConfigStore.shared.resolvedMaxOutputTokens)
 
         let router = AIToolRouter(registry: registry, coordinator: coordinator, mcp: MCPStore.shared)
 

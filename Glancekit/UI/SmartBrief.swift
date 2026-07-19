@@ -108,7 +108,12 @@ final class SmartBriefModel {
             endpoint: store.effectiveEndpoint,
             apiKey: store.apiKey,
             model: store.model,
-            systemPrompt: Self.briefSystemPrompt
+            systemPrompt: Self.briefSystemPrompt,
+            // The brief is one sentence under 20 words. Reserving a chat-sized
+            // budget for it is what makes a low-balance gateway refuse the
+            // Assistant's next turn — the panel refreshes far more often than
+            // anyone opens the chat, so it must be the cheap one.
+            maxOutputTokens: 96
         )
         let prompt = Self.prompt(context: context, items: items)
         aiTask = Task { [weak self] in

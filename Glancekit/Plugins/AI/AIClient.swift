@@ -44,6 +44,14 @@ enum AIChatError: Error, LocalizedError {
             case 401, 403:
                 let base = "Authentication failed (HTTP \(code)). Check your API key in Settings."
                 return trimmed.isEmpty ? base : "\(base) \(trimmed)"
+            case 402:
+                // The gateway reserves `max_tokens` against the balance before
+                // generating, so the fix is a smaller cap — not a smaller
+                // question. Say that, because the raw body says "add credits"
+                // and the cheaper option is one field away in Settings.
+                let base = "Not enough credit for a reply this long (HTTP 402)."
+                let hint = "Lower \u{201C}Max reply length\u{201D} in Settings, or top up with your provider."
+                return trimmed.isEmpty ? "\(base) \(hint)" : "\(base) \(hint) \(trimmed)"
             case 429:
                 let base = "Rate limit or quota exceeded (HTTP 429)."
                 let hint = "Wait and try again, or switch to a lighter model or another provider in Settings."
@@ -83,6 +91,26 @@ struct AIRequestConfig {
     let apiKey: String
     let model: String
     let systemPrompt: String
+
+    /// Ceiling on the reply's length. Credit-gated gateways (OpenRouter) reserve
+    /// against this value up front and reject the request when the balance can't
+    /// cover it, so it's per-request rather than one constant: a chat turn needs
+    /// room to think, the one-sentence Smart Panel brief needs almost none, and
+    /// making the brief reserve a chat-sized budget is what starves the chat.
+    let maxOutputTokens: Int
+
+    /// Chat-sized default, for callers that don't care.
+    static let defaultMaxOutputTokens = 1024
+
+    init(providerKind: AIProviderKind, endpoint: String, apiKey: String, model: String,
+         systemPrompt: String, maxOutputTokens: Int = AIRequestConfig.defaultMaxOutputTokens) {
+        self.providerKind = providerKind
+        self.endpoint = endpoint
+        self.apiKey = apiKey
+        self.model = model
+        self.systemPrompt = systemPrompt
+        self.maxOutputTokens = maxOutputTokens
+    }
 }
 
 // MARK: - Client
@@ -203,7 +231,7 @@ struct AIClient {
 
         var body: [String: Any] = [
             "model": config.model,
-            "max_tokens": 2048,
+            "max_tokens": config.maxOutputTokens,
             "messages": messages,
         ]
         let system = config.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -290,10 +318,7 @@ struct AIClient {
 
         var body: [String: Any] = [
             "model": config.model,
-            // Cap output so credit-gated gateways (e.g. OpenRouter) reserve
-            // against this value instead of the model's max (often 65536),
-            // which trips a 402 on low-balance accounts.
-            "max_tokens": 2048,
+            "max_tokens": config.maxOutputTokens,
             "messages": messages,
         ]
         if !tools.isEmpty {

@@ -78,6 +78,29 @@ struct AISettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
+                LabeledField("Max reply length") {
+                    HStack(spacing: 8) {
+                        // Stepper rather than a free text field: the value is a
+                        // spending cap, and the useful range is narrow enough
+                        // that typing an arbitrary number invites a 402 or a
+                        // truncated answer.
+                        Stepper(
+                            value: $store.maxOutputTokens,
+                            in: AIConfigStore.minOutputTokens...AIConfigStore.maxOutputTokensCeiling,
+                            step: 256
+                        ) {
+                            Text("\(store.resolvedMaxOutputTokens) tokens")
+                                .monospacedDigit()
+                        }
+                        Spacer()
+                    }
+                }
+                Text("The longest reply the assistant may write. Pay-as-you-go gateways reserve this whole amount before answering and refuse the request if your balance can't cover it — lower it if you hit a credit error. The Smart Panel's one-line summary always uses far less.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text("System Prompt")
                     .font(.subheadline.weight(.semibold))
                 TextEditor(text: $store.systemPrompt)

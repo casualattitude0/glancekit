@@ -163,6 +163,26 @@ final class AIConfigStore {
         didSet { persist() }
     }
 
+    /// Ceiling on the assistant's reply length, in tokens.
+    ///
+    /// User-settable because it's really a spending dial: gateways that gate on
+    /// credit (OpenRouter) reserve this whole amount before generating and
+    /// refuse the request outright when the balance can't cover it — so a low
+    /// balance needs a low cap, not a better model. Deliberately not clamped in
+    /// a `didSet` (that would recurse); `resolvedMaxOutputTokens` clamps at the
+    /// point of use instead.
+    var maxOutputTokens: Int {
+        didSet { persist() }
+    }
+
+    /// `maxOutputTokens` clamped to something a request can actually use.
+    var resolvedMaxOutputTokens: Int {
+        min(max(maxOutputTokens, Self.minOutputTokens), Self.maxOutputTokensCeiling)
+    }
+
+    static let minOutputTokens = 128
+    static let maxOutputTokensCeiling = 8192
+
     /// The API key for the *current* provider. Stored (so the UI binds to it and
     /// `isConfigured` reacts live), and mirrored into `CredentialStore` on every
     /// change under the current provider's key. Reloaded when the provider
@@ -178,6 +198,7 @@ final class AIConfigStore {
     private let baseURLKey = "glancekit.ai.baseURL"
     private let modelKey = "glancekit.ai.model"
     private let systemPromptKey = "glancekit.ai.systemPrompt"
+    private let maxOutputTokensKey = "glancekit.ai.maxOutputTokens"
 
     static func keychainKey(for providerID: String) -> String { "ai.apiKey.\(providerID)" }
     private static let legacyKeychainKey = "ai.apiKey"
@@ -201,6 +222,11 @@ final class AIConfigStore {
         baseURL = defaults.string(forKey: baseURLKey) ?? (provider.requiresBaseURL ? provider.defaultBaseURL : "")
         model = defaults.string(forKey: modelKey) ?? provider.models.first ?? ""
         systemPrompt = defaults.string(forKey: systemPromptKey) ?? Self.defaultSystemPrompt
+        // Absent key ⇒ the chat-sized default. Modest on purpose: a reply that
+        // needs more is rare, and the cap is easier to raise once than to
+        // diagnose as a 402.
+        let storedMax = defaults.integer(forKey: maxOutputTokensKey)
+        maxOutputTokens = storedMax > 0 ? storedMax : AIRequestConfig.defaultMaxOutputTokens
 
         // Property observers don't fire inside init, so seed `apiKey` directly:
         // migrate any single legacy key onto the resolved provider, then load.
@@ -280,5 +306,6 @@ final class AIConfigStore {
         defaults.set(baseURL, forKey: baseURLKey)
         defaults.set(model, forKey: modelKey)
         defaults.set(systemPrompt, forKey: systemPromptKey)
+        defaults.set(maxOutputTokens, forKey: maxOutputTokensKey)
     }
 }
