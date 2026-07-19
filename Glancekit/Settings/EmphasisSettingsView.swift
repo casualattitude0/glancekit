@@ -14,6 +14,13 @@ import SwiftUI
 /// the ranking has four buckets, so anything finer would promise a precision the
 /// feed can't honour — and three fixed stops stay readable down the column,
 /// which a row of sliders wouldn't.
+///
+/// Laid out like the Quick Switch page, which answers the same question about
+/// the same list of glances: the ones you can act on in one section, the ones
+/// turned off on the Glances page in an "Off in Glances" section beneath, dimmed
+/// and without a control. A glance that's off never reaches the feed, so a
+/// weight on it would be a dead control — it's listed only so its absence is
+/// explained rather than looking like the page forgot it.
 struct EmphasisSettingsView: View {
     @Environment(PluginRegistry.self) private var registry
     @Environment(GlanceEmphasisStore.self) private var store
@@ -23,18 +30,12 @@ struct EmphasisSettingsView: View {
     /// and have no emphasis to set. Mirrors `SmartPanelView.pinnedIDs`.
     private static let pinnedIDs: Set<String> = [PluginRegistry.assistantPluginID, "notes"]
 
-    /// Only enabled, unpinned glances can appear in the feed — those are the
-    /// only rows where this control does anything.
-    private var rows: [any GlancePlugin] {
-        registry.enabledPluginsInOrder.filter { !Self.pinnedIDs.contains($0.id) }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Emphasis")
                 .font(.headline)
 
-            Text("Choose how much each glance is worth surfacing. High glances lead the Smart Panel and its summary whenever they have something to say; Low ones settle beneath the rest. This changes the order things are shown in — it never hides a glance.")
+            Text(intro)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -50,17 +51,20 @@ struct EmphasisSettingsView: View {
                 .foregroundStyle(.secondary)
             }
 
-            if rows.isEmpty {
-                ContentUnavailableView(
-                    "No glances enabled",
-                    systemImage: "square.grid.2x2",
-                    description: Text("Turn some on from the Glances page to weight them here.")
-                )
-                .padding(.vertical, 24)
-            } else {
-                List(rows, id: \.id, rowContent: row)
-                    .frame(minHeight: 280)
+            List {
+                if !enabledRows.isEmpty {
+                    Section("Enabled") {
+                        ForEach(enabledRows, id: \.id, content: rowBody)
+                    }
+                }
+
+                if !disabledRows.isEmpty {
+                    Section("Off in Glances") {
+                        ForEach(disabledRows, id: \.id, content: disabledRowBody)
+                    }
+                }
             }
+            .frame(minHeight: 280)
 
             HStack {
                 Spacer()
@@ -73,15 +77,16 @@ struct EmphasisSettingsView: View {
         }
     }
 
-    private func row(_ plugin: any GlancePlugin) -> some View {
+    /// A row in the "Enabled" section: the glance and the weight it carries.
+    private func rowBody(_ row: Row) -> some View {
         HStack(spacing: 12) {
-            Label(plugin.title, systemImage: plugin.iconSystemName)
+            Label(row.title, systemImage: row.icon)
 
             Spacer(minLength: 8)
 
             Picker("", selection: Binding(
-                get: { store.emphasis(for: plugin.id) },
-                set: { store.setEmphasis($0, for: plugin.id) }
+                get: { store.emphasis(for: row.id) },
+                set: { store.setEmphasis($0, for: row.id) }
             )) {
                 ForEach(GlanceEmphasis.allCases) { level in
                     Text(level.title).tag(level)
@@ -93,6 +98,52 @@ struct EmphasisSettingsView: View {
             // long the glance titles are.
             .frame(width: 190)
         }
-        .help("How strongly \(plugin.title) is surfaced in the Smart Panel")
+        .help("How strongly \(row.title) is surfaced in the Smart Panel")
+    }
+
+    /// A row in the "Off in Glances" section: no weight control, since a glance
+    /// that's off never reaches the feed to be weighted. Dimmed and shown only
+    /// so the glance's absence from the list above is explained.
+    private func disabledRowBody(_ row: Row) -> some View {
+        HStack {
+            Label(row.title, systemImage: row.icon)
+            Spacer()
+            Text("Turn on in Glances to use")
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    private var intro: String {
+        "Choose how much each glance is worth surfacing. High glances lead the Smart Panel and its summary whenever they have something to say; Low ones settle beneath the rest. This changes the order things are shown in — it never hides a glance. Glances you've turned off on the Glances page are listed under “Off in Glances” — turn one back on there to weight it here."
+    }
+
+    /// Every glance in the user's order, whether it's on or off — the page shows
+    /// the off ones for context. The Assistant and Notes are pinned to the
+    /// panel's footer rather than ranked into the feed, so they're dropped
+    /// entirely: there's no ordering for a weight to affect.
+    private var rows: [Row] {
+        registry.orderedPlugins.compactMap { plugin in
+            guard !Self.pinnedIDs.contains(plugin.id) else { return nil }
+            return Row(
+                id: plugin.id,
+                title: plugin.title,
+                icon: plugin.iconSystemName,
+                isEnabled: registry.isEnabled(plugin.id)
+            )
+        }
+    }
+
+    private var enabledRows: [Row] { rows.filter(\.isEnabled) }
+
+    /// Glances turned off on the Glances page: shown for context, no control.
+    private var disabledRows: [Row] { rows.filter { !$0.isEnabled } }
+
+    private struct Row {
+        let id: String
+        let title: String
+        let icon: String
+        /// Whether the glance is on at all, over on the Glances page.
+        let isEnabled: Bool
     }
 }
