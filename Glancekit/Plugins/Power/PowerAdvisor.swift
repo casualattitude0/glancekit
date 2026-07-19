@@ -50,8 +50,15 @@ enum PowerAdvisor {
         var profile = UsageProfile()
         guard samples.count >= 2 else { return profile }
 
-        profile.spanHours = max(0, samples[samples.count - 1].time
-            .timeIntervalSince(samples[0].time)) / 3600
+        // Observed time only: the sum of gaps we actually watched, not raw
+        // first-to-last wall clock. History is persisted across launches, so a
+        // Mac that was shut overnight leaves a 10-hour hole between two
+        // adjacent samples — counting that hole would divide the charge cycles
+        // we *did* see by a stretch of time nobody was looking.
+        profile.spanHours = zip(samples, samples.dropFirst())
+            .map { $0.1.time.timeIntervalSince($0.0.time) }
+            .filter { $0 > 0 && $0 <= maxGap }
+            .reduce(0, +) / 3600
 
         // --- Drain rate: walk backwards over the trailing discharge stretch.
         let endIndex = samples.count - 1

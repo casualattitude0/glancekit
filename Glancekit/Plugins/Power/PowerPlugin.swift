@@ -42,9 +42,15 @@ final class PowerPlugin: GlancePlugin {
     private var firedFullChargeAlert = false
     private var overheatLatched = false
 
-    /// The last charge-advice we reminded about, and when — used to suppress
-    /// repeats of the same advice until the cooldown expires.
-    private var lastReminderAction: PowerAdvisor.Action?
+    /// Consecutive non-actionable readings seen since the last actionable one.
+    /// The reminder re-arms only once this reaches `readingsToRearm`, so a
+    /// single jittery `.steady` between two real warnings doesn't reset it.
+    private var steadyReadings = 0
+
+    /// ~90s at the 30s refresh interval.
+    private static let readingsToRearm = 3
+
+    /// When the last charge reminder fired — the cooldown's anchor.
     private var lastReminderDate: Date?
 
     /// Reminders stay quiet until this instant — set by the Smart Panel card's
@@ -277,7 +283,12 @@ final class PowerPlugin: GlancePlugin {
         PowerAdvisor.Policy(
             lowThreshold: lowThreshold,
             chargeCeiling: chargeCeiling,
-            chargeFloor: max(chargeFloor, lowThreshold + 5),
+            // Kept a clear band below the ceiling. Without this an inverted
+            // pair (floor 60, ceiling 50) makes the advisor demand a charge on
+            // battery and an unplug on AC — a flip-flop with no resting state.
+            // Clamped here as well as at the steppers, so a pair already
+            // persisted by an older build is corrected on read.
+            chargeFloor: min(max(chargeFloor, lowThreshold + 5), chargeCeiling - 10),
             overheatThreshold: overheatThreshold,
             leadTimeMinutes: reminderLeadMinutes,
             protectLongevity: protectLongevity
@@ -405,20 +416,32 @@ final class PowerPlugin: GlancePlugin {
 
     /// Remind the user to charge (or unplug) when the advisor turns actionable.
     ///
-    /// Two guards keep this from nagging: the same advice never fires twice
-    /// inside the cooldown, and a change back to `.steady` re-arms it — so a
-    /// plug-in or an unplug immediately clears the state that produced the last
-    /// reminder.
+    /// Two guards keep this from nagging: nothing fires twice inside the
+    /// cooldown, and the reminder only re-arms once the advice has been quiet
+    /// for a few readings — so a plug-in or an unplug clears the state that
+    /// produced the last reminder, but a flicker doesn't.
+    ///
+    /// Both guards are deliberately blunt, because the input is noisy.
+    /// `refresh()` runs every 30s and `minutesToReach` rides on IOKit's
+    /// `timeToEmptyMinutes`, which jitters by minutes between samples: a
+    /// battery sitting near the lead time crosses back and forth. Keying the
+    /// cooldown on *which* advice fired let every one of those crossings
+    /// through, and re-arming on a single `.steady` reading let a flicker
+    /// cancel a snooze the user had just set.
     private func evaluateChargeReminder() {
         guard remindCharge, snapshot.hasBattery, let advice else { return }
 
         guard advice.isActionable else {
-            lastReminderAction = nil
-            lastReminderDate = nil
-            // Whatever the user snoozed has resolved itself — un-mute.
-            clearSnooze()
+            steadyReadings += 1
+            // ~90s of quiet before believing it. Anything less is jitter.
+            if steadyReadings >= Self.readingsToRearm {
+                lastReminderDate = nil
+                // Whatever the user snoozed has resolved itself — un-mute.
+                clearSnooze()
+            }
             return
         }
+        steadyReadings = 0
 
         // An explicit snooze outranks the cooldown, except for a truly urgent
         // "plug in now": an empty battery is worth breaking the silence for.
@@ -426,12 +449,14 @@ final class PowerPlugin: GlancePlugin {
             return
         }
 
-        if advice.action == lastReminderAction, let last = lastReminderDate,
+        // Keyed on the last notification, not on what it was about: a battery
+        // near the lead time alternates between "charge soon" and "unplug", and
+        // matching on the action would let each alternation past the cooldown.
+        if let last = lastReminderDate,
            Date().timeIntervalSince(last) < Double(reminderCooldownMinutes) * 60 {
             return
         }
 
-        lastReminderAction = advice.action
         lastReminderDate = Date()
         PowerAlerts.notify(title: advice.headline, body: advice.reason)
     }
@@ -1058,12 +1083,15 @@ private struct PowerSettings: View {
             Text("Advice blends your recent drain rate, battery health and temperature with the current charge.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Protect longevity (suggest unplugging at the ceiling)", isOn: $plugin.protectLongevity)
-            Stepper(value: $plugin.chargeCeiling, in: 50...100, step: 5) {
+            // Each end is bounded by the other, keeping a 10-point band
+            // between them: floor above ceiling has no coherent meaning and
+            // leaves the advisor with no resting state.
+            Stepper(value: $plugin.chargeCeiling, in: (plugin.chargeFloor + 10)...100, step: 5) {
                 Text("Charge ceiling \(plugin.chargeCeiling)%")
                     .font(.callout)
             }
             .disabled(!plugin.protectLongevity)
-            Stepper(value: $plugin.chargeFloor, in: 15...60, step: 5) {
+            Stepper(value: $plugin.chargeFloor, in: 15...(plugin.chargeCeiling - 10), step: 5) {
                 Text("Comfort floor \(plugin.chargeFloor)%")
                     .font(.callout)
             }
