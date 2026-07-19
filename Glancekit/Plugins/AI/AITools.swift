@@ -6,8 +6,9 @@ import Foundation
 /// `specs` describes every tool to the model; `execute(_:)` runs a call the
 /// model chose and returns a short string (usually JSON) the model reads back.
 /// Everything is wired to the real stores — `ColorPaletteStore.shared`,
-/// `NotesStore.shared`, and the injected `PluginRegistry` / `RefreshCoordinator`
-/// — so the assistant manipulates the same state the rest of the app shows.
+/// `NotesStore.shared`, `GlanceEmphasisStore.shared`, and the injected
+/// `PluginRegistry` / `RefreshCoordinator` — so the assistant manipulates the
+/// same state the rest of the app shows.
 ///
 /// `@MainActor` because it touches those observable stores. It's a `struct`: it
 /// holds only references and is cheap to recreate per turn.
@@ -18,6 +19,7 @@ struct AIToolbox {
 
     private var palettes: ColorPaletteStore { .shared }
     private var notes: NotesStore { .shared }
+    private var emphasis: GlanceEmphasisStore { .shared }
 
     init(registry: PluginRegistry, coordinator: RefreshCoordinator) {
         self.registry = registry
@@ -78,8 +80,25 @@ struct AIToolbox {
 
             AIToolSpec(
                 name: "list_tools",
-                description: "List every Glancekit tool/glance with its id, title, and whether it's enabled.",
+                description: "List every Glancekit tool/glance with its id, title, whether it's enabled, and its emphasis (low/normal/high) — how much weight it carries in the Smart Panel's ranked feed and summary. Read this before changing emphasis, so you can see what's already set.",
                 parametersJSONSchema: Self.objectSchema([:])),
+
+            AIToolSpec(
+                name: "set_emphasis",
+                description: """
+                    Set how much weight glances carry in the Smart Panel: "high" makes a \
+                    glance lead the feed and the summary whenever it has something to say, \
+                    "low" settles it beneath the rest, "normal" is the default. It only \
+                    changes the order things are shown in — it never hides a glance, so use \
+                    disable_tool when the user wants one gone entirely. Sets one level \
+                    across every id given, so call it once per level. When the user \
+                    describes what they care about ("I live in meetings", "stop nagging me \
+                    about memory"), suggest a specific set of changes and make them.
+                    """,
+                parametersJSONSchema: Self.objectSchema([
+                    "level": Self.stringProperty("\"low\", \"normal\", or \"high\"."),
+                    "ids": Self.stringArrayProperty("The tool/glance ids to set to this level."),
+                ], required: ["level", "ids"])),
 
             AIToolSpec(
                 name: "enable_tool",
@@ -133,6 +152,7 @@ struct AIToolbox {
         case "list_tools": return listTools()
         case "enable_tool": return setToolEnabled(call.arguments, enabled: true)
         case "disable_tool": return setToolEnabled(call.arguments, enabled: false)
+        case "set_emphasis": return setEmphasis(call.arguments)
         default:
             return "Unknown tool \"\(call.name)\"."
         }
@@ -254,6 +274,7 @@ struct AIToolbox {
                 "id": plugin.id,
                 "title": plugin.title,
                 "enabled": registry.isEnabled(plugin.id),
+                "emphasis": emphasis.emphasis(for: plugin.id).name,
             ] as [String: Any]
         }
         return Self.json(payload)
@@ -269,6 +290,49 @@ struct AIToolbox {
         registry.setEnabled(plugin.id, enabled)
         coordinator.reconcile()
         return "\(enabled ? "Enabled" : "Disabled") \u{2018}\(plugin.title)\u{2019} (\(plugin.id))."
+    }
+
+    /// Set one emphasis level across a batch of glances, so "I care about
+    /// meetings, not system stats" is one approval prompt per level rather than
+    /// one per glance.
+    ///
+    /// Unknown ids don't fail the call: the known ones are applied and the rest
+    /// reported back, so a model that guessed one id wrong still gets the user's
+    /// preference applied and can correct itself from the reply.
+    private func setEmphasis(_ args: [String: Any]) -> String {
+        guard let level = GlanceEmphasis(name: Self.string(args["level"]) ?? "") else {
+            return "Emphasis must be \"low\", \"normal\", or \"high\"."
+        }
+        let keys = Self.stringArray(args["ids"])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !keys.isEmpty else { return "At least one tool id is required." }
+
+        var applied: [String] = []
+        var unknown: [String] = []
+        for key in keys {
+            guard let plugin = registry.plugins.first(where: { $0.id.caseInsensitiveCompare(key) == .orderedSame }) else {
+                unknown.append(key)
+                continue
+            }
+            emphasis.setEmphasis(level, for: plugin.id)
+            applied.append(plugin.title)
+        }
+
+        guard !applied.isEmpty else {
+            let available = registry.plugins.map(\.id).joined(separator: ", ")
+            return "No tool with id \(unknown.map { "\"\($0)\"" }.joined(separator: ", ")). Available ids: \(available)."
+        }
+
+        var reply = "Set \(applied.joined(separator: ", ")) to \(level.title) emphasis."
+        if !unknown.isEmpty {
+            reply += " No tool with id \(unknown.map { "\"\($0)\"" }.joined(separator: ", "))."
+        }
+        // Emphasis only re-ranks what the Smart Panel already shows, so there's
+        // no data to refetch — but the panel is rebuilt from the store, so a
+        // reconcile makes the new order show up without reopening it.
+        coordinator.reconcile()
+        return reply
     }
 
     // MARK: - Argument helpers

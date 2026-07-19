@@ -30,6 +30,23 @@ enum GlanceEmphasis: Int, CaseIterable, Identifiable, Sendable {
         case .high: "High"
         }
     }
+
+    /// The lowercase name used on the wire — what the assistant's `set_emphasis`
+    /// tool sends and what `list_tools` reports back.
+    var name: String { title.lowercased() }
+
+    /// Parse a level the assistant supplied. Accepts the names, and the raw
+    /// numbers a model may send instead of a string. Returns nil for anything
+    /// else so the tool can answer with the valid options rather than silently
+    /// picking a level the user didn't ask for.
+    init?(name: String) {
+        switch name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "low", "-1": self = .low
+        case "normal", "0": self = .normal
+        case "high", "1": self = .high
+        default: return nil
+        }
+    }
 }
 
 extension GlanceSignal.Priority {
@@ -55,6 +72,14 @@ extension GlanceSignal.Priority {
 @MainActor
 @Observable
 final class GlanceEmphasisStore {
+
+    /// The one instance the app runs on. The assistant's toolbox reaches state
+    /// through singletons (`NotesStore.shared`, `ColorPaletteStore.shared`)
+    /// rather than the SwiftUI environment, which it has no access to — so a
+    /// tool and the Settings page must be looking at the same object for a
+    /// change the assistant makes to appear in the UI.
+    static let shared = GlanceEmphasisStore()
+
     private let defaults = UserDefaults.standard
     private let key = "glancekit.glance.emphasis"
 

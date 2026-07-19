@@ -10,7 +10,7 @@ struct GlancekitApp: App {
     @State private var tutorial: TutorialController
     @State private var panelSettings = MenuPanelSettings()
     @State private var panelHistory = SmartPanelHistory()
-    @State private var emphasis = GlanceEmphasisStore()
+    @State private var emphasis = GlanceEmphasisStore.shared
 
     init() {
         let registry = PluginRegistry()
