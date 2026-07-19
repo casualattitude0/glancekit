@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Stable identifiers for the three app-wide "General" sidebar pages. These are
+/// Stable identifiers for the app-wide "General" sidebar pages. These are
 /// sentinel `settingsSelection` values — not plugin ids — shared between
 /// `SettingsView` (which renders and selects them) and `TutorialController`
 /// (which drives the selection to walk the tour through them). Keeping them in
@@ -12,6 +12,7 @@ import SwiftUI
 /// registry directly.
 enum SettingsSection {
     static let glances = "__glances__"
+    static let emphasis = "__emphasis__"
     static let shortcuts = "__shortcuts__"
     static let quickSwitch = "__quickswitch__"
 }
@@ -41,6 +42,7 @@ struct SettingsView: View {
     private static let glancesSelection = SettingsSection.glances
     private static let shortcutsSelection = SettingsSection.shortcuts
     private static let quickSwitchSelection = SettingsSection.quickSwitch
+    private static let emphasisSelection = SettingsSection.emphasis
 
     /// The Assistant glance's id — promoted to a top-of-General sidebar entry.
     /// Its detail pane is its plugin `settingsSection()`, resolved the same way
@@ -103,6 +105,8 @@ struct SettingsView: View {
                 Label("Glances", systemImage: "square.grid.2x2")
                     .tag(Self.glancesSelection)
                     .tutorialAnchor(SettingsSection.glances)
+                Label("Emphasis", systemImage: "slider.horizontal.3")
+                    .tag(Self.emphasisSelection)
                 Label("Shortcuts", systemImage: "command")
                     .tag(Self.shortcutsSelection)
                     .tutorialAnchor(SettingsSection.shortcuts)
@@ -155,6 +159,8 @@ struct SettingsView: View {
                     ShortcutsSettingsView()
                 } else if selection == Self.quickSwitchSelection {
                     QuickSwitchSettingsView()
+                } else if selection == Self.emphasisSelection {
+                    EmphasisSettingsView()
                 } else if let plugin = registry.orderedPlugins.first(where: { $0.id == selection }) {
                     plugin.settingsSection()
                 } else {
@@ -171,6 +177,7 @@ struct SettingsView: View {
         switch registry.settingsSelection {
         case Self.shortcutsSelection: "Shortcuts"
         case Self.quickSwitchSelection: "Quick Switch"
+        case Self.emphasisSelection: "Emphasis"
         case let id?: registry.plugin(id: id)?.title ?? "Glances"
         case nil: "Glances"
         }

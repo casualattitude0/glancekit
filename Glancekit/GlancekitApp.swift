@@ -10,6 +10,7 @@ struct GlancekitApp: App {
     @State private var tutorial: TutorialController
     @State private var panelSettings = MenuPanelSettings()
     @State private var panelHistory = SmartPanelHistory()
+    @State private var emphasis = GlanceEmphasisStore()
 
     init() {
         let registry = PluginRegistry()
@@ -92,6 +93,7 @@ struct GlancekitApp: App {
                 .environment(coordinator)
                 .environment(panelSettings)
                 .environment(panelHistory)
+                .environment(emphasis)
                 .frame(width: 340)
         } label: {
             MenuBarLabelView()
@@ -109,6 +111,7 @@ struct GlancekitApp: App {
                 .environment(updater)
                 .environment(tutorial)
                 .environment(panelSettings)
+                .environment(emphasis)
         }
 
         // Standalone first-run window. Opened once on launch by MenuBarLabelView;
