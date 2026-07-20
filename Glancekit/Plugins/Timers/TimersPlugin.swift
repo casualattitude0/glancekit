@@ -1,7 +1,6 @@
 import SwiftUI
 import Observation
 import AppKit
-import UserNotifications
 
 /// Timers glance: multiple concurrent countdown timers plus a stopwatch.
 ///
@@ -387,9 +386,17 @@ final class TimersPlugin: GlancePlugin {
     private func fireAlert(for item: TimerItem) {
         if playSound { playFinishSound() }
         guard showNotification else { return }
-        postNotification(
+        // `sound: false` — the finish sound above is the user's own choice, and
+        // the service beep on top would be two noises for one timer.
+        // A fresh identifier each time: a repeating timer posting a stable id
+        // would rewrite its own row instead of announcing the next loop.
+        NotificationService.post(
             title: item.repeats ? "Timer looped" : "Timer done",
-            body: displayLabel(item))
+            body: displayLabel(item),
+            tint: .blue,
+            identifier: "\(item.id)-\(UUID().uuidString.prefix(8))",
+            source: "timers",
+            sound: false)
     }
 
     /// Play the selected finish sound, falling back to the system beep when the
@@ -402,24 +409,6 @@ final class TimersPlugin: GlancePlugin {
             sound.play()
         } else {
             NSSound.beep()
-        }
-    }
-
-    /// Best-effort user notification. Requests authorization lazily the first
-    /// time; if the app can't post (no bundle id, denied, unavailable) it
-    /// silently falls back to just the beep — never crashes.
-    private func postNotification(title: String, body: String) {
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
-            let request = UNNotificationRequest(
-                identifier: UUID().uuidString, content: content, trigger: nil)
-            center.add(request, withCompletionHandler: nil)
         }
     }
 
@@ -898,7 +887,9 @@ private struct TimersSettings: View {
                 Button("Preview") { plugin.playFinishSound() }
                     .disabled(!plugin.playSound)
             }
-            Toggle("Show system notification", isOn: $plugin.showNotification)
+            // Whether a finished timer notifies at all; how it notifies (panel,
+            // system record, corner, dwell) lives in Settings ▸ Notifications.
+            Toggle("Notify when a timer finishes", isOn: $plugin.showNotification)
             Text("Notifications require Glancekit to be allowed under System Settings › Notifications. If denied, the finish sound still plays.")
                 .font(.caption).foregroundStyle(.secondary)
 

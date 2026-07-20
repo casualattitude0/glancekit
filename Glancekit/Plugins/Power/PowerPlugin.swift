@@ -26,6 +26,15 @@ final class PowerPlugin: GlancePlugin {
     private(set) var history: [HistorySample] = []
     private let maxHistory = 120
 
+    /// A separate, long-horizon log of charge-session start times (one timestamp
+    /// per rising edge into a charge). Capped small but kept for weeks, so charge
+    /// cadence has a horizon the ~1-hour sparkline can never reach. Persisted on
+    /// its own key rather than by inflating `maxHistory`, which would bloat the
+    /// sparkline payload and slow its rendering for a figure the sparkline never
+    /// shows.
+    private(set) var chargeLog: [Date] = []
+    private let maxChargeLog = 60
+
     /// The instant the Mac was last unplugged (moved onto battery), persisted so
     /// "time on battery" survives a relaunch while still unplugged. `nil` when
     /// on AC or unknown.
@@ -152,6 +161,7 @@ final class PowerPlugin: GlancePlugin {
     }
 
     private let historyKey = "glancekit.power.history"
+    private let chargeLogKey = "glancekit.power.chargeLog"
     private let unplugDateKey = "glancekit.power.unplugDate"
     private let plugDateKey = "glancekit.power.plugDate"
 
@@ -189,6 +199,10 @@ final class PowerPlugin: GlancePlugin {
            let decoded = try? JSONDecoder().decode([HistorySample].self, from: data) {
             history = decoded
         }
+        if let data = d.data(forKey: chargeLogKey),
+           let decoded = try? JSONDecoder().decode([Date].self, from: data) {
+            chargeLog = decoded
+        }
         unplugDate = d.object(forKey: unplugDateKey) as? Date
         plugDate = d.object(forKey: plugDateKey) as? Date
         reminderSnoozeUntil = d.object(forKey: snoozeKey) as? Date
@@ -225,15 +239,44 @@ final class PowerPlugin: GlancePlugin {
             }
         }
         updateUnplugTracking()
-        usage = PowerAdvisor.usageProfile(from: history.map { ($0.percent, $0.time) })
+        recordChargeSession()
+        usage = PowerAdvisor.usageProfile(from: history.map { ($0.percent, $0.time) },
+                                          chargeLog: chargeLog)
         evaluateAlerts()
         evaluateChargeReminder()
     }
 
-    /// Empty the charge-history buffer and persisted copy.
+    /// Empty the charge-history buffer and persisted copy. The long-horizon
+    /// charge-cadence log is a separate record, but "clear history" is the
+    /// user's reset-my-usage gesture, so it goes too.
     func clearHistory() {
         history.removeAll()
+        chargeLog.removeAll()
         UserDefaults.standard.removeObject(forKey: historyKey)
+        UserDefaults.standard.removeObject(forKey: chargeLogKey)
+    }
+
+    /// Append a rising-edge timestamp when a new charge session begins, feeding
+    /// the long-horizon cadence log that `chargesPerDay` is derived from.
+    ///
+    /// One event per AC session: the session's plug-in instant (`plugDate`,
+    /// itself persisted) is the boundary. If the newest logged edge already sits
+    /// at or after it, this charge is counted — so a mid-charge relaunch (which
+    /// re-observes the charging state from scratch) and a brief charging flicker
+    /// within one session both collapse to a single event, never a duplicate.
+    /// Must run after `updateUnplugTracking()` so `plugDate` reflects this tick.
+    private func recordChargeSession() {
+        guard snapshot.hasBattery, snapshot.state == .charging else { return }
+        guard let session = plugDate else { return }
+        if let last = chargeLog.last, last >= session { return }
+
+        chargeLog.append(Date())
+        if chargeLog.count > maxChargeLog {
+            chargeLog.removeFirst(chargeLog.count - maxChargeLog)
+        }
+        if let data = try? JSONEncoder().encode(chargeLog) {
+            UserDefaults.standard.set(data, forKey: chargeLogKey)
+        }
     }
 
     /// Elapsed time since the Mac was last unplugged, while still on battery.
@@ -267,7 +310,10 @@ final class PowerPlugin: GlancePlugin {
         if let perDay = usage.chargesPerDay, perDay > 0.1 {
             parts.append(String(format: "~%.1f charges/day", perDay))
             let remaining = Double(PowerAdvisor.ratedCycles - cycles)
-            if remaining > 0, usage.spanHours >= 24 {
+            // Gate on the charge-log horizon, not the ~1-hour sparkline span:
+            // projecting years of remaining life demands at least a couple of
+            // days of observed charging cadence to be anything but noise.
+            if remaining > 0, usage.chargeLogSpanHours >= 48 {
                 let months = remaining / perDay / 30.0
                 if months < 120 {
                     parts.append(months >= 12
@@ -387,9 +433,12 @@ final class PowerPlugin: GlancePlugin {
         if alertFullCharge, isFull, plugged {
             if !firedFullChargeAlert {
                 firedFullChargeAlert = true
-                PowerAlerts.notify(
+                NotificationService.post(
                     title: "Battery fully charged",
-                    body: "Your Mac has reached 100%. You can unplug it."
+                    body: "Your Mac has reached 100%. You can unplug it.",
+                    tint: .green,
+                    identifier: "full-charge-\(UUID().uuidString.prefix(8))",
+                    source: "power"
                 )
             }
         } else if !plugged || snapshot.state == .discharging {
@@ -402,10 +451,13 @@ final class PowerPlugin: GlancePlugin {
             if t >= Double(overheatThreshold) {
                 if !overheatLatched {
                     overheatLatched = true
-                    PowerAlerts.notify(
+                    NotificationService.post(
                         title: "Battery running warm",
                         body: String(format: "Battery is %.1f°C (threshold %d°C).",
-                                     t, overheatThreshold)
+                                     t, overheatThreshold),
+                        tint: .orange,
+                        identifier: "overheat-\(UUID().uuidString.prefix(8))",
+                        source: "power"
                     )
                 }
             } else if t < Double(overheatThreshold) - 2 {
@@ -458,7 +510,15 @@ final class PowerPlugin: GlancePlugin {
         }
 
         lastReminderDate = Date()
-        PowerAlerts.notify(title: advice.headline, body: advice.reason)
+        // Fires repeatedly on the cooldown, so the identifier has to vary: an id
+        // still sitting in Notification Center would be rewritten in place and
+        // draw no banner, silencing exactly the reminders that recur.
+        NotificationService.post(
+            title: advice.headline,
+            body: advice.reason,
+            tint: advice.urgency == .urgent ? .red : .orange,
+            identifier: "charge-\(UUID().uuidString.prefix(8))",
+            source: "power")
     }
 
     /// The Smart Panel card is the advisor's verdict, not a raw battery readout:

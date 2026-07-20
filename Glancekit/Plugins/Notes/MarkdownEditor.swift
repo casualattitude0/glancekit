@@ -51,7 +51,10 @@ struct MarkdownEditor: NSViewRepresentable {
             width: contentSize.width, height: bigDimension)
 
         textView.delegate = context.coordinator
-        textView.onCommandReturn = { onCommandReturn() }
+        // Routed through the coordinator rather than captured directly: the
+        // struct this closure would capture is the one from *this* runloop turn,
+        // and `updateNSView` replaces `coordinator.parent` on every redraw.
+        textView.onCommandReturn = { context.coordinator.parent.onCommandReturn() }
 
         textView.isRichText = false
         textView.allowsUndo = true
@@ -91,7 +94,16 @@ struct MarkdownEditor: NSViewRepresentable {
         // caret.
         if textView.string != text {
             let selected = textView.selectedRange()
-            textView.string = text
+            let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+            // Replace *through* the text view rather than assigning `.string`,
+            // so the swap joins the undo stack: ⌘Z after a ⇥ reformat puts back
+            // exactly what you pasted.
+            if textView.shouldChangeText(in: whole, replacementString: text) {
+                textView.textStorage?.replaceCharacters(in: whole, with: text)
+                textView.didChangeText()
+            } else {
+                textView.string = text
+            }
             textView.setSelectedRange(NSRange(
                 location: min(selected.location, (text as NSString).length), length: 0))
         }
@@ -118,7 +130,11 @@ struct MarkdownEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.string
+            // `updateNSView` also routes its writes through `didChangeText` (to
+            // keep undo working), which lands back here. Writing the binding
+            // again from inside a view update is what SwiftUI complains about,
+            // so only publish a value that actually differs.
+            if parent.text != textView.string { parent.text = textView.string }
             highlight(textView)
         }
 

@@ -49,9 +49,9 @@ private struct NotesPopover: View {
     /// back to false once it has taken focus.
     @State private var wantsFocus = false
 
-    /// Preview swaps the source editor for rendered markdown. Transient view
-    /// state — a fresh window always opens ready to write.
-    @State private var showPreview = false
+    /// Which editing surface is showing. Transient view state — a fresh window
+    /// always opens ready to write.
+    @State private var mode: NotesMode = .write
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -69,7 +69,7 @@ private struct NotesPopover: View {
 
             Divider()
 
-            NotesEditorColumn(store: store, showPreview: $showPreview,
+            NotesEditorColumn(store: store, mode: $mode,
                               wantsFocus: $wantsFocus, showNewNote: false)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.leading, 16)
@@ -82,7 +82,7 @@ private struct NotesPopover: View {
     /// Editor on top, saved shelf below — the compact menu-popover shape.
     private var singleColumn: some View {
         VStack(alignment: .leading, spacing: 12) {
-            NotesEditorColumn(store: store, showPreview: $showPreview,
+            NotesEditorColumn(store: store, mode: $mode,
                               wantsFocus: $wantsFocus, showNewNote: true)
             if !store.notes.isEmpty {
                 NotesShelf(store: store)
@@ -95,23 +95,35 @@ private struct NotesPopover: View {
 /// count/save footer. Shared by both layouts.
 private struct NotesEditorColumn: View {
     @Bindable var store: NotesStore
-    @Binding var showPreview: Bool
+    @Binding var mode: NotesMode
     @Binding var wantsFocus: Bool
     /// Whether the mode toolbar carries the New Note button. The two-pane layout
     /// puts it in the sidebar instead, so this is false there.
     var showNewNote: Bool
 
+    /// Lives here rather than in the JSON pane because the status bar — a
+    /// sibling view — drives it too.
+    @State private var foldController = JSONFoldController()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            NotesToolbar(store: store, showPreview: $showPreview,
+            NotesToolbar(store: store, mode: $mode,
                          wantsFocus: $wantsFocus, showNewNote: showNewNote)
 
             Group {
-                if showPreview {
-                    NotesPreviewPane(store: store)
-                } else {
+                switch mode {
+                case .write:
                     NotesEditor(store: store, wantsFocus: $wantsFocus)
+                case .json:
+                    NotesJSONEditor(store: store, wantsFocus: $wantsFocus,
+                                    foldController: foldController)
+                case .preview:
+                    NotesPreviewPane(store: store)
                 }
+            }
+
+            if mode == .json {
+                NotesJSONStatusBar(store: store, foldController: foldController)
             }
 
             NotesFooter(store: store, wantsFocus: $wantsFocus)
@@ -122,22 +134,24 @@ private struct NotesEditorColumn: View {
 /// Mode switch on the left; New Note (optional) and Focus on the right.
 private struct NotesToolbar: View {
     @Bindable var store: NotesStore
-    @Binding var showPreview: Bool
+    @Binding var mode: NotesMode
     @Binding var wantsFocus: Bool
     var showNewNote: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            Picker("Mode", selection: $showPreview) {
-                Text("Write").tag(false)
-                Text("Preview").tag(true)
+            Picker("Mode", selection: $mode) {
+                ForEach(NotesMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .onChange(of: showPreview) { _, previewing in
-                // Coming back to the editor, put the caret straight back in it.
-                if !previewing { wantsFocus = true }
+            .onChange(of: mode) { _, mode in
+                // Coming back to an editable surface, put the caret straight
+                // back in it.
+                if mode != .preview { wantsFocus = true }
             }
 
             Spacer()
@@ -152,8 +166,10 @@ private struct NotesToolbar: View {
             }
             .toggleStyle(.button)
             .controlSize(.large)
-            // Focus mode only affects the editor; it's meaningless in preview.
-            .disabled(showPreview)
+            // Focus mode is a prose gesture: it dims all but the paragraph
+            // you're in, which means nothing in rendered preview or in JSON,
+            // where the structure around the caret is the point.
+            .disabled(mode != .write)
             .help("Focus mode: dim everything but the paragraph you're writing")
         }
     }
@@ -268,6 +284,123 @@ private struct NotesEditor: View {
                     .padding(.vertical, 16)
                     .allowsHitTesting(false)
             }
+        }
+    }
+}
+
+/// The same draft, edited as JSON: JSON colouring instead of markdown, and ⇥ /
+/// ⇧⇥ bound to expand / collapse.
+///
+/// The keys are the whole feature, so they're deliberately the *primary* way to
+/// format — the status bar below carries the same two actions as buttons for
+/// discoverability, not as the main path.
+private struct NotesJSONEditor: View {
+    @Bindable var store: NotesStore
+    @Binding var wantsFocus: Bool
+    let foldController: JSONFoldController
+
+    var body: some View {
+        JSONEditor(
+            text: $store.draft,
+            foldController: foldController,
+            wantsFocus: $wantsFocus,
+            onCommandReturn: {
+                store.save()
+                wantsFocus = true
+            },
+            // Returning false when the draft doesn't parse lets ⇥ insert a real
+            // tab instead of being swallowed — half-typed JSON still behaves
+            // like a text field.
+            onTab: { store.expandDraftJSON() },
+            onBacktab: { store.collapseDraftJSON() }
+        )
+        .frame(minHeight: 220)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .topLeading) {
+            if store.draft.isEmpty {
+                Text("Paste JSON, then press ⇥ to format\nClick the gutter marks to fold a block")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 16)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+/// Under the JSON field: what the draft currently is (or why it won't parse),
+/// the sort-keys switch, and the two formatting actions.
+private struct NotesJSONStatusBar: View {
+    @Bindable var store: NotesStore
+    let foldController: JSONFoldController
+
+    var body: some View {
+        HStack(spacing: 8) {
+            status
+                .font(.caption2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(-1)
+
+            Spacer(minLength: 4)
+
+            Button {
+                foldController.foldAll()
+            } label: {
+                Label("Fold All", systemImage: "arrow.down.right.and.arrow.up.left")
+                    .labelStyle(.iconOnly)
+            }
+            .help("Collapse every block")
+
+            Button {
+                foldController.expandAll()
+            } label: {
+                Label("Expand All", systemImage: "arrow.up.left.and.arrow.down.right")
+                    .labelStyle(.iconOnly)
+            }
+            .help("Expand every block")
+
+            Toggle("Sort keys", isOn: $store.sortJSONKeys)
+                .toggleStyle(.checkbox)
+                .font(.caption2)
+                .help("Sort every object's keys alphabetically when formatting")
+
+            // Only the actions dim when the draft won't parse. The status text
+            // stays at full strength — it's the error explaining *why* they're
+            // unavailable, so greying it out would hide the one useful thing.
+            Group {
+                Button("Format") { store.expandDraftJSON() }
+                    .help("Expand to indented JSON (⇥)")
+
+                Button("Minify") { store.collapseDraftJSON() }
+                    .help("Collapse onto one line (⇧⇥)")
+            }
+            .disabled(!store.canFormatDraft)
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        switch store.jsonStatus {
+        case .empty:
+            Text("Nothing to format yet")
+                .foregroundStyle(.tertiary)
+        case .valid(let summary):
+            Label(summary, systemImage: "checkmark.circle")
+                .foregroundStyle(.secondary)
+        case .repairable(let summary, let repairs):
+            // Says what it *will* change, not just that something's off — the
+            // repairs are applied to your text, so they're the headline.
+            Label("\(summary) · fixes on ⇥: \(repairs.joined(separator: ", "))",
+                  systemImage: "wand.and.sparkles")
+                .foregroundStyle(.secondary)
+                .help("This isn't strict JSON, but ⇥ will repair it: \(repairs.joined(separator: ", "))")
+        case .invalid(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
         }
     }
 }
@@ -451,6 +584,25 @@ private struct NotesSettings: View {
                 Button("Delete All…") { isConfirmingDeleteAll = true }
                     .disabled(store.notes.isEmpty)
             }
+
+            Divider()
+
+            Text("JSON mode")
+                .font(.subheadline.weight(.semibold))
+
+            Toggle("Sort object keys when formatting", isOn: $store.sortJSONKeys)
+
+            Picker("Indent", selection: $store.jsonIndent) {
+                Text("2 spaces").tag(2)
+                Text("4 spaces").tag(4)
+                Text("8 spaces").tag(8)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+
+            Text("In JSON mode, ⇥ expands the draft to indented JSON and ⇧⇥ collapses it onto one line.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .confirmationDialog(
             "Delete all notes?",
