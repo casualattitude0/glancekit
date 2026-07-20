@@ -77,6 +77,19 @@ struct StocksQuoteRow: View {
     /// Compared against on each update. `quote` is a value, so the view has no
     /// other way to know what the previous price was.
     @State private var shownPrice: Double?
+    /// Held so a new tick can cancel the previous fade. Without it, two ticks
+    /// inside the fade window leave the older timer running, and it clears the
+    /// newer tick's colour early — the flash visibly cuts out mid-fade.
+    @State private var fade: Task<Void, Never>?
+    /// Drives the blink itself: dropped to dim instantly, then eased back up.
+    /// Separate from `tick` because the two run on different clocks — the dim
+    /// is a single fast blink, the colour lingers long enough to be read.
+    @State private var blink = false
+
+    /// Motion is decoration here; the colour carries the meaning. So with
+    /// Reduce Motion on, the tint still appears and still clears, it just does
+    /// so instantly rather than easing.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 8) {
@@ -98,10 +111,15 @@ struct StocksQuoteRow: View {
             Spacer(minLength: 4)
 
             VStack(alignment: .trailing, spacing: 1) {
+                // The flicker is confined to this one Text. Monospaced digits
+                // mean it can dim and recolour in place without the row
+                // reflowing, which is what makes a blink readable here rather
+                // than distracting.
                 Text(StocksFormat.price(quote.price))
                     .font(.body.monospacedDigit())
                     .contentTransition(.numericText())
                     .foregroundStyle(tick.map { $0 ? Color.green : .red } ?? .primary)
+                    .opacity(blink ? 0.2 : 1)
                 Text(StocksFormat.signedPercent(quote.changePercent))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(quote.isUp ? .green : .red)
@@ -122,12 +140,25 @@ struct StocksQuoteRow: View {
             }
             shownPrice = price
             guard price != previous else { return }
-            withAnimation(.easeOut(duration: 0.2)) { tick = price > previous }
-            Task {
-                try? await Task.sleep(nanoseconds: 900_000_000)
-                withAnimation(.easeIn(duration: 0.4)) { tick = nil }
+
+            let rising = price > previous
+            fade?.cancel()
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { tick = rising }
+
+            // Unanimated down, animated back up — that asymmetry is the blink.
+            // Skipped under Reduce Motion, where a rapid opacity swing is the
+            // exact thing being asked to stop; the colour still carries it.
+            if !reduceMotion {
+                blink = true
+                withAnimation(.easeOut(duration: 0.24)) { blink = false }
+            }
+            fade = Task {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(reduceMotion ? nil : .easeIn(duration: 0.5)) { tick = nil }
             }
         }
+        .onDisappear { fade?.cancel() }
     }
 }
 
