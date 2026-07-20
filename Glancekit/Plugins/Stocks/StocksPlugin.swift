@@ -455,6 +455,10 @@ private struct StocksPopover: View {
                 }
             }
 
+            // Below the rows rather than above: it's a reassurance to glance
+            // down at, not something to read before the prices.
+            StocksFeedStatus(lastFetch: plugin.lastTaiwanFetch)
+
             Divider()
 
             StocksHoldingsSection(

@@ -162,6 +162,63 @@ struct StocksQuoteRow: View {
     }
 }
 
+/// Whether quotes are still arriving, and how long since the last one.
+///
+/// Per-row flashes only fire when a price *changes*, so on their own they can't
+/// distinguish the two ways a screen full of unchanging numbers happens: a
+/// quiet market, or a feed that died. That ambiguity is exactly what hid the
+/// stale-price bug, so the heartbeat here is tied to the fetch succeeding
+/// rather than to any price moving.
+struct StocksFeedStatus: View {
+    let lastFetch: Date?
+
+    @State private var beat = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // Re-evaluated on a timer, not just when a quote lands: going stale is
+        // the absence of an update, so nothing else would trigger a redraw and
+        // the row would sit there claiming to be live indefinitely.
+        TimelineView(.periodic(from: .now, by: 2)) { context in
+            let state = state(at: context.date)
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(state.tint)
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(beat ? 1.55 : 1)
+                    .opacity(beat ? 1 : 0.75)
+                Text(state.label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(state.label)
+        }
+        .onChange(of: lastFetch) {
+            // One pulse per successful fetch. A repeating animation would look
+            // identical whether or not data was arriving, which is the opposite
+            // of what this is for.
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 0.15)) { beat = true }
+            withAnimation(.easeIn(duration: 0.45).delay(0.15)) { beat = false }
+        }
+    }
+
+    /// Thresholds are generous against the 5s cadence: the exchange's own
+    /// snapshot can repeat for ~25s, and a fetch can be queued behind the rate
+    /// gate, so "late" only starts well past anything routine.
+    private func state(at now: Date) -> (tint: Color, label: String) {
+        guard TWMarketClock.isOpen(now) else {
+            return (.secondary, lastFetch.map { "已收盤 · \(StocksFormat.time($0))" } ?? "已收盤")
+        }
+        guard let lastFetch else { return (.secondary, "尚未更新") }
+        let age = now.timeIntervalSince(lastFetch)
+        if age <= 30 { return (.green, "即時") }
+        if age <= 120 { return (.orange, String(format: "延遲 %.0f 秒", age)) }
+        return (.red, "連線中斷 · \(StocksFormat.time(lastFetch))")
+    }
+}
+
 /// A minimal line chart for an intraday series.
 struct StocksSparkline: View {
     let values: [Double]
