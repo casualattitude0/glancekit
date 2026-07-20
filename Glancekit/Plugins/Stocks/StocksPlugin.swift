@@ -22,13 +22,25 @@ final class StocksPlugin: GlancePlugin {
     nonisolated var title: String { "Stocks" }
     nonisolated var iconSystemName: String { "chart.line.uptrend.xyaxis" }
 
+    /// 5s — the floor MIS declares for itself via `userDelay: 5000`, and the
+    /// fastest cadence the documented budget allows without eating into it.
+    /// The whole watchlist rides one pipe-joined request, so this spends 1 of
+    /// the 3 requests per 5-second window however many symbols are listed,
+    /// leaving the history sweep room to share the same gate.
+    ///
+    /// Polling at the floor does *not* mean a new price every tick: the
+    /// exchange's snapshot can sit unchanged for 25s at a stretch (measured
+    /// 2026-07-20 — eight polls spanning `t` 09:24:00 → 09:24:25). That is why
+    /// `appendSeries` is keyed on the snapshot advancing rather than on the
+    /// fetch succeeding; without that the sparkline fills with repeats.
+    ///
     /// A fixed, short cadence — deliberately *not* computed from market hours.
     /// `RefreshCoordinator` reads this once when it builds the loop
     /// (`Core/RefreshCoordinator.swift`), so a value that varies with the clock
     /// is frozen at whatever it was at launch. The real cadence is enforced
     /// inside `refresh()`, which is also where it belongs: that's where the
     /// rate-limit budget is spent.
-    var refreshInterval: TimeInterval { 20 }
+    var refreshInterval: TimeInterval { 5 }
 
     /// Room for the two-pane plan board (a stock list beside its detail panel).
     ///
@@ -66,7 +78,13 @@ final class StocksPlugin: GlancePlugin {
     /// Intraday prices accumulated tick by tick, so Taiwan rows get a sparkline
     /// even though MIS only ever reports a single point.
     private var seriesBuffer: [String: [Double]] = [:]
-    private static let seriesCap = 180
+    /// One point per distinct exchange snapshot, so the cap counts *ticks* and
+    /// no longer has to be retuned whenever `refreshInterval` changes. A quiet
+    /// stock spends them slowly and keeps hours of context; an active one
+    /// spends them fast and shows a tighter, more detailed window — which is
+    /// the right bias for a sparkline either way. 720 covers a full 4.5-hour
+    /// session at one snapshot every ~20s.
+    private static let seriesCap = 720
 
     private var lastForeignFetch: Date?
     private var lastHistorySweepDay: String?
@@ -181,7 +199,7 @@ final class StocksPlugin: GlancePlugin {
     private func shouldFetchTaiwan(now: Date = Date()) -> Bool {
         guard let last = lastTaiwanFetch else { return true }
         let elapsed = now.timeIntervalSince(last)
-        return TWMarketClock.isOpen(now) ? elapsed >= 18 : elapsed >= 900
+        return TWMarketClock.isOpen(now) ? elapsed >= 4.5 : elapsed >= 900
     }
 
     private func refreshForeign(collecting errors: inout [String]) async {
