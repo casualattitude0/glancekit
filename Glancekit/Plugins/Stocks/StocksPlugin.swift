@@ -243,8 +243,25 @@ final class StocksPlugin: GlancePlugin {
               let prior = latest[quote.symbol],
               let priorTrade = prior.tradePrice,
               prior.previousClose == quote.previousClose else { return }
-        quote.price = priorTrade
-        quote.tradePrice = priorTrade
+
+        // A remembered print is only worth showing while the live book still
+        // agrees with it. `z` can stay blank for minutes at a stretch, and over
+        // that span the market can walk away from the last trade entirely — at
+        // which point carrying it forward stops being "the last price" and
+        // becomes a stale one, which is the delay it would look like on screen.
+        //
+        // A real trade happens at the bid or the ask, so a print outside the
+        // current spread has been overtaken by definition. Clamping to the near
+        // side keeps the number on the tick grid, tracks the market as it
+        // moves, and needs no timer to decide when the memory expired.
+        var carried = priorTrade
+        if let bid = quote.bid, carried < bid { carried = bid }
+        if let ask = quote.ask, carried > ask { carried = ask }
+
+        quote.price = carried
+        // Only still a *traded* price if the book didn't overrule it — the
+        // strategy engine and the next carry-forward both read this flag.
+        quote.tradePrice = carried == priorTrade ? priorTrade : nil
     }
 
     private func appendSeries(_ price: Double, for key: String) {

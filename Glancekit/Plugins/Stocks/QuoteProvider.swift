@@ -35,6 +35,11 @@ struct StockQuote: Identifiable, Equatable {
     /// where being one tick off would misreport it as still trading.
     var limitUp: Double? = nil
     var limitDown: Double? = nil
+    /// Best bid and ask. Kept because they are the only part of a Taiwan quote
+    /// that stays live while `tradePrice` is blank, which makes them the check
+    /// on whether a carried-forward trade is still telling the truth.
+    var bid: Double? = nil
+    var ask: Double? = nil
     /// When the exchange says this quote was struck (not when we fetched it) —
     /// the difference matters for telling a live tick from a stale one.
     var quotedAt: Date? = nil
