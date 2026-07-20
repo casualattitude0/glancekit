@@ -71,12 +71,18 @@ enum NotificationService {
     ///     delivering a new one, and an update draws no banner — so callers
     ///     that want a fresh alert must vary it.
     ///   - source: which glance raised it; namespaces the identifier.
+    ///   - sound: whether this event wants an audible cue at all. Pass `false`
+    ///     from a caller that has already played its own — Timers lets the user
+    ///     pick a finish sound, and adding the beep on top would be two noises
+    ///     for one event. The user's `playsSound` preference still has the final
+    ///     say when this is `true`.
     static func post(title: String,
                      body: String = "",
                      tint: Color = .accentColor,
                      identifier: String,
-                     source: String) {
-        if preferences.playsSound { NSSound.beep() }
+                     source: String,
+                     sound: Bool = true) {
+        if sound, preferences.playsSound { NSSound.beep() }
 
         if preferences.showsPanel {
             NotificationPanel.show(title: title, body: body, tint: tint,

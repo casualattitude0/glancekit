@@ -13,6 +13,12 @@ struct GlancekitApp: App {
     @State private var emphasis = GlanceEmphasisStore.shared
 
     init() {
+        // Before anything can post, and before launch finishes: the notification
+        // centre wants its delegate assigned that early, and attaching it later
+        // fails invisibly — delivery succeeds, no error is returned, and the only
+        // symptom is a banner that never draws.
+        NotificationService.prepare()
+
         let registry = PluginRegistry()
         // Built up front (not at line ~60) because AIPlugin needs it at
         // registration time to drive its enable/disable tools.
