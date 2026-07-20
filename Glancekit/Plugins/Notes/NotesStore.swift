@@ -65,6 +65,42 @@ struct Note: Identifiable, Codable, Equatable {
     }
 }
 
+/// What the editor column is showing: the markdown source, the same draft as
+/// JSON, or the rendered markdown.
+///
+/// JSON is a *mode of the editor*, not a second field — the draft is one string
+/// either way, so you can paste an API response, hit ⇥ to tidy it, and save it
+/// next to your prose notes.
+enum NotesMode: String, CaseIterable, Identifiable {
+    case write
+    case json
+    case preview
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .write: "Write"
+        case .json: "JSON"
+        case .preview: "Preview"
+        }
+    }
+}
+
+/// The outcome of checking the draft against the JSON grammar, for the status
+/// line under the field.
+enum JSONDraftStatus: Equatable {
+    case empty
+    /// Strict JSON. Carries a shape summary, e.g. "object · 4 keys".
+    case valid(String)
+    /// Not strict JSON, but close enough to repair on format. Carries the
+    /// summary and the list of repairs that formatting would apply — shown
+    /// *before* you press anything, so no repair is a surprise.
+    case repairable(summary: String, repairs: [String])
+    /// Beyond repair. Carries the parse error, already formatted for display.
+    case invalid(String)
+}
+
 /// Owns the notes and the in-progress draft, and persists both to
 /// `UserDefaults`.
 ///
@@ -101,15 +137,38 @@ final class NotesStore {
         didSet { defaults.set(focusMode, forKey: Self.focusModeKey) }
     }
 
+    /// Sort every object's keys when formatting. On by default: the whole reason
+    /// to reformat a pasted payload is to be able to *find* things in it, and
+    /// two responses from the same endpoint only diff cleanly once their keys
+    /// are in the same order.
+    var sortJSONKeys: Bool = true {
+        didSet { defaults.set(sortJSONKeys, forKey: Self.sortJSONKeysKey) }
+    }
+
+    /// Spaces per level when pretty-printing. 2 is the JSON house style.
+    var jsonIndent: Int = 2 {
+        didSet { defaults.set(jsonIndent, forKey: Self.jsonIndentKey) }
+    }
+
     private let defaults: UserDefaults
     private static let notesKey = "glancekit.notes.items"
     private static let draftKey = "glancekit.notes.draft"
     private static let focusModeKey = "glancekit.notes.focusMode"
+    private static let sortJSONKeysKey = "glancekit.notes.sortJSONKeys"
+    private static let jsonIndentKey = "glancekit.notes.jsonIndent"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         draft = defaults.string(forKey: Self.draftKey) ?? ""
         focusMode = defaults.bool(forKey: Self.focusModeKey)
+        // `object(forKey:)` rather than `bool`/`integer`, so a first run keeps
+        // the defaults above instead of reading back false/0.
+        if let stored = defaults.object(forKey: Self.sortJSONKeysKey) as? Bool {
+            sortJSONKeys = stored
+        }
+        if let stored = defaults.object(forKey: Self.jsonIndentKey) as? Int, stored > 0 {
+            jsonIndent = stored
+        }
         if let data = defaults.data(forKey: Self.notesKey),
            let decoded = try? JSONDecoder().decode([Note].self, from: data) {
             notes = decoded
@@ -134,6 +193,80 @@ final class NotesStore {
     }
 
     var isEditing: Bool { editingID != nil }
+
+    // MARK: - JSON mode
+
+    /// Live verdict on the draft, for the status line. Recomputed on every
+    /// keystroke — a note-sized payload parses in well under a frame, and the
+    /// alternative (debouncing) would make the field feel like it's lagging.
+    /// Live verdict on the draft, for the status line.
+    ///
+    /// Strict first, then lenient: the difference between "this is JSON" and
+    /// "this can be *made* into JSON" is exactly what the user needs to know
+    /// before pressing ⇥, so the two can't be collapsed into one attempt.
+    var jsonStatus: JSONDraftStatus {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .empty }
+
+        if let strict = try? parseJSON(draft) { return .valid(Self.summarize(strict)) }
+
+        do {
+            let result = try parseJSONLeniently(draft)
+            return .repairable(summary: Self.summarize(result.node), repairs: result.repairs)
+        } catch let error as JSONParseError {
+            return .invalid(error.localizedDescription)
+        } catch {
+            return .invalid("Not valid JSON")
+        }
+    }
+
+    /// Whether the format actions would do anything — true for repairable text
+    /// too, since repairing is the point.
+    var canFormatDraft: Bool {
+        switch jsonStatus {
+        case .valid, .repairable: true
+        case .empty, .invalid: false
+        }
+    }
+
+    /// ⇥ — expand the draft to indented JSON.
+    ///
+    /// Returns false when the draft doesn't parse, so the editor can let the key
+    /// fall through and insert a literal tab rather than eating it silently:
+    /// while you're still typing, ⇥ should behave like ⇥.
+    @discardableResult
+    func expandDraftJSON() -> Bool {
+        rewriteDraft { try formatJSON($0, indent: jsonIndent, sortKeys: sortJSONKeys) }
+    }
+
+    /// ⇧⇥ — collapse the draft onto one line.
+    @discardableResult
+    func collapseDraftJSON() -> Bool {
+        rewriteDraft { try minifyJSON($0, sortKeys: sortJSONKeys) }
+    }
+
+    /// Runs a formatter over the draft, leaving it untouched if it throws or if
+    /// the result is identical (so a no-op ⇥ doesn't dirty the undo stack).
+    private func rewriteDraft(_ transform: (String) throws -> String) -> Bool {
+        guard let formatted = try? transform(draft) else { return false }
+        guard formatted != draft else { return true }
+        draft = formatted
+        return true
+    }
+
+    /// A one-line description of what parsed — the reassurance half of the
+    /// status line, so a valid document says something more useful than a tick.
+    private static func summarize(_ node: JSONNode) -> String {
+        switch node {
+        case .object(let members):
+            return "object · \(members.count) key\(members.count == 1 ? "" : "s")"
+        case .array(let elements):
+            return "array · \(elements.count) item\(elements.count == 1 ? "" : "s")"
+        case .string: return "string"
+        case .number: return "number"
+        case .bool: return "boolean"
+        case .null: return "null"
+        }
+    }
 
     /// Banks the draft: updates the note being edited, or files a new one at the
     /// top. Clears the field either way.
