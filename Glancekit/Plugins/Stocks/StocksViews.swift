@@ -257,6 +257,12 @@ struct StocksQuoteRow: View {
 /// rather than to any price moving.
 struct StocksFeedStatus: View {
     let lastFetch: Date?
+    /// The exchange's stamp on the data itself, as opposed to when we fetched
+    /// it. Shown because the two differ by more than people expect.
+    let quotedAt: Date?
+    /// How long the loop waits between fetches, so the countdown is derived
+    /// from the real cadence rather than a number duplicated in the view.
+    let cadence: TimeInterval
 
     @State private var beat = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -265,8 +271,9 @@ struct StocksFeedStatus: View {
         // Re-evaluated on a timer, not just when a quote lands: going stale is
         // the absence of an update, so nothing else would trigger a redraw and
         // the row would sit there claiming to be live indefinitely.
-        TimelineView(.periodic(from: .now, by: 2)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { context in
             let state = state(at: context.date)
+            let countdown = countdown(at: context.date)
             HStack(spacing: 5) {
                 Circle()
                     .fill(state.tint)
@@ -276,9 +283,30 @@ struct StocksFeedStatus: View {
                 Text(state.label)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let countdown {
+                    // Monospaced so the row doesn't twitch as the digit counts
+                    // down — a width that changes every second would undo the
+                    // steadiness this is here to provide.
+                    Text(countdown)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                if let age = quoteAge(at: context.date) {
+                    // The exchange's lag, stated rather than left to be felt as
+                    // an unexplained gap against a broker terminal. Amber once
+                    // it exceeds a snapshot interval, since past that the number
+                    // on screen is genuinely behind the market, not just this
+                    // panel's own polling.
+                    // Erased because the two branches are different shape-style
+                    // types — Color and HierarchicalShapeStyle don't unify.
+                    Text(age.label)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(age.late ? AnyShapeStyle(Color.orange)
+                                                  : AnyShapeStyle(.tertiary))
+                }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(state.label)
+            .accessibilityLabel([state.label, countdown].compactMap { $0 }.joined(separator: " "))
         }
         .onChange(of: lastFetch) {
             // One pulse per successful fetch. A repeating animation would look
@@ -288,6 +316,33 @@ struct StocksFeedStatus: View {
             withAnimation(.easeOut(duration: 0.15)) { beat = true }
             withAnimation(.easeIn(duration: 0.45).delay(0.15)) { beat = false }
         }
+    }
+
+    /// Seconds until the next fetch is due, or 更新中 while one should be in
+    /// flight. Nil outside the session, where the cadence drops to 15 minutes
+    /// and a countdown that long is noise rather than reassurance.
+    ///
+    /// It stops once the feed is meaningfully late: past that the number would
+    /// be counting toward something that isn't coming, and `state` has already
+    /// switched to 延遲/連線中斷, which is the more honest thing to be reading.
+    private func countdown(at now: Date) -> String? {
+        guard cadence <= 60, TWMarketClock.isOpen(now), let lastFetch else { return nil }
+        let remaining = cadence - now.timeIntervalSince(lastFetch)
+        guard remaining > -3 else { return nil }
+        return remaining <= 0 ? "更新中…" : String(format: "%.0fs", remaining.rounded(.up))
+    }
+
+    /// How old the data itself is, by the exchange's own stamp.
+    ///
+    /// Measured on 2026-07-20: MIS stamps a snapshot 5–6s behind its own server
+    /// clock and only advances it every 15–20s, so 7–23s is the normal range
+    /// and none of it is this app's doing. 25s is the line where the reading
+    /// has outlived a full snapshot interval and is worth flagging.
+    private func quoteAge(at now: Date) -> (label: String, late: Bool)? {
+        guard TWMarketClock.isOpen(now), let quotedAt else { return nil }
+        let age = now.timeIntervalSince(quotedAt)
+        guard age >= 0 else { return nil }
+        return (String(format: "報價 −%.0fs", age), age > 25)
     }
 
     /// Thresholds are generous against the 5s cadence: the exchange's own

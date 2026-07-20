@@ -55,6 +55,20 @@ final class StocksPlugin: GlancePlugin {
     /// making every other glance's Quick Switch window bigger.
     var preferredToolWindowSize: CGSize? { CGSize(width: 520, height: 640) }
 
+    /// The cadence the popover counts down to. `shouldFetchTaiwan` gates a
+    /// little under this so loop jitter can never skip a tick; the number shown
+    /// is the loop's own interval, which is what actually reaches the screen.
+    var taiwanCadence: TimeInterval { TWMarketClock.isOpen() ? refreshInterval : 900 }
+
+    /// The exchange's own timestamp on the freshest Taiwan quote we hold.
+    ///
+    /// Distinct from `lastTaiwanFetch`, and the gap between them is the point:
+    /// MIS stamps its snapshots 5–6s behind its own clock and only advances
+    /// them every 15–20s (measured 2026-07-20), so a quote that arrived just
+    /// now can still be twenty seconds old. Surfacing this stops that showing
+    /// up as an unexplained lag between the panel and a broker terminal.
+    var taiwanQuotedAt: Date? { latest.values.compactMap(\.quotedAt).max() }
+
     /// Which plan stock the detail panel is showing. Lives on the plugin rather
     /// than in `@State` so the selection survives moving between the popover,
     /// the tool window and Quick Switch — all three render the same section, and
@@ -474,7 +488,9 @@ private struct StocksPopover: View {
 
             // Below the rows rather than above: it's a reassurance to glance
             // down at, not something to read before the prices.
-            StocksFeedStatus(lastFetch: plugin.lastTaiwanFetch)
+            StocksFeedStatus(lastFetch: plugin.lastTaiwanFetch,
+                             quotedAt: plugin.taiwanQuotedAt,
+                             cadence: plugin.taiwanCadence)
 
             Divider()
 
