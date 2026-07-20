@@ -1138,8 +1138,8 @@ struct StocksLevelLadder: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(rungs) { rung in
                     switch rung.content {
-                    case .level(let status):
-                        levelRung(status)
+                    case .level(let status, let isCurrent):
+                        levelRung(status, isCurrent: isCurrent)
                     case .price(let value):
                         priceRung(value)
                     }
@@ -1148,16 +1148,20 @@ struct StocksLevelLadder: View {
         }
     }
 
-    private func levelRung(_ status: LevelStatus) -> some View {
+    /// `isCurrent` means the price is sitting exactly on this level, so this
+    /// rung *is* the price marker. The action label stays put and keeps its
+    /// colour — losing track of what to do at the one price where you're
+    /// standing is the worst possible moment to lose it.
+    private func levelRung(_ status: LevelStatus, isCurrent: Bool) -> some View {
         HStack(spacing: 6) {
             Text(status.line.map(StocksFormat.price) ?? "—")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(.caption.monospacedDigit().weight(isCurrent ? .semibold : .regular))
+                .foregroundStyle(isCurrent ? .primary : .secondary)
                 .frame(width: 46, alignment: .trailing)
 
             Rectangle()
                 .fill(StocksFormat.tint(for: status.kind).opacity(status.hasFired ? 0.9 : 0.45))
-                .frame(width: 14, height: 1.5)
+                .frame(width: 14, height: isCurrent ? 2 : 1.5)
 
             Text(StocksFormat.levelLabel(status.kind))
                 .font(.caption2.weight(.medium))
@@ -1184,8 +1188,17 @@ struct StocksLevelLadder: View {
             } else if status.isAdvisoryOnly {
                 Text("僅提示").font(.caption2).foregroundStyle(.tertiary)
             }
+
+            // Last in the row, so 現價 lands on the same right-hand edge whether
+            // or not this level also carries a status marker — a label that
+            // shifts left when a checkmark appears is one the eye has to hunt
+            // for on the very rung it should find fastest.
+            if isCurrent { currentPriceTag }
         }
         .frame(height: 18)
+        .padding(.vertical, isCurrent ? 1 : 0)
+        .background(isCurrent ? Color.accentColor.opacity(0.10) : .clear,
+                    in: RoundedRectangle(cornerRadius: 4))
     }
 
     private func priceRung(_ value: Double) -> some View {
@@ -1198,21 +1211,34 @@ struct StocksLevelLadder: View {
                 .fill(Color.accentColor)
                 .frame(width: 14, height: 2)
 
-            Text("現價")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-
             Spacer(minLength: 0)
+
+            currentPriceTag
         }
         .frame(height: 20)
         .padding(.vertical, 1)
         .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
     }
 
+    /// One definition, used by both rung shapes, so the tag can't drift between
+    /// the standalone marker and the one merged onto a level.
+    private var currentPriceTag: some View {
+        Text("現價")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Color.accentColor)
+    }
+
     private struct Rung: Identifiable {
-        enum Content { case level(LevelStatus), price(Double) }
+        enum Content { case level(LevelStatus, isCurrent: Bool), price(Double) }
         let id: String
         let content: Content
+    }
+
+    /// Both sides come off the same tick grid, so this is an equality test that
+    /// tolerates the float round trip rather than a proximity test.
+    private func sitsOn(_ line: Double?, _ price: Double) -> Bool {
+        guard let line else { return false }
+        return abs(line - price) < 0.0001
     }
 
     /// Levels high-to-low with the live price inserted where it actually sits.
@@ -1220,14 +1246,26 @@ struct StocksLevelLadder: View {
     /// they'd have no position on the ladder, and inventing one would misplace
     /// the price marker relative to everything else.
     private func rungs() -> [Rung] {
-        var out = rows
+        let sorted = rows
             .filter { $0.line != nil }
             .sorted { ($0.line ?? 0) > ($1.line ?? 0) }
-            .map { Rung(id: $0.id, content: .level($0)) }
 
-        guard let price else { return out }
+        // When the price sits exactly on a level, that level becomes the price
+        // marker instead of getting its own rung beside it. Two rungs showing
+        // the same number read as one row that lost its action label — and the
+        // level you're standing on is the one whose instruction you most need.
+        //
+        // Every level at that price is marked, not just the first: a plan can
+        // put 減碼 and 重進 on the same line, and picking one to highlight would
+        // hide the other behind the very marker meant to draw the eye.
+        var out = sorted.map { status in
+            Rung(id: status.id,
+                 content: .level(status, isCurrent: price.map { sitsOn(status.line, $0) } ?? false))
+        }
+
+        guard let price, !sorted.contains(where: { sitsOn($0.line, price) }) else { return out }
         let insertAt = out.firstIndex { rung in
-            if case .level(let status) = rung.content { return (status.line ?? 0) < price }
+            if case .level(let status, _) = rung.content { return (status.line ?? 0) < price }
             return false
         } ?? out.count
         out.insert(Rung(id: "__price", content: .price(price)), at: insertAt)
