@@ -93,6 +93,9 @@ private final class NotificationWindow: NSPanel {
                    backing: .buffered, defer: false)
 
         isFloatingPanel = true
+        // ARC owns these through `panels`; the AppKit default would add a
+        // release on `close()` and over-release the window.
+        isReleasedWhenClosed = false
         level = .statusBar
         backgroundColor = .clear
         isOpaque = false

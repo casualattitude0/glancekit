@@ -341,8 +341,12 @@ final class BrowsingPlugin: GlancePlugin {
 
         for visit in visits {
             firefoxWatermark = max(firefoxWatermark, visit.visitDateMicros)
+            // Same gate the Apple-Event path goes through: `moz_places` hands
+            // back `about:`, `file:` and extension rows, and the blocklist and
+            // query stripping live here too.
+            guard let canonical = canonicalize(visit.url) else { continue }
             record(
-                url: visit.url,
+                url: canonical,
                 title: visit.title,
                 browser: .firefox,
                 at: Date(timeIntervalSince1970: Double(visit.visitDateMicros) / 1_000_000)
