@@ -111,6 +111,8 @@ struct TWSEQuoteProvider: QuoteProvider {
             open: num(e.o),
             dayHigh: num(e.h),
             dayLow: num(e.l),
+            limitUp: num(e.u),
+            limitDown: num(e.w),
             quotedAt: e.tlong.flatMap(Double.init).map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }

@@ -29,6 +29,12 @@ struct StockQuote: Identifiable, Equatable {
     var open: Double? = nil
     var dayHigh: Double? = nil
     var dayLow: Double? = nil
+    /// The session's price limits (漲停/跌停), ±10% of the previous close on
+    /// TWSE. Carried rather than recomputed because the exchange applies its
+    /// own rounding to the tick grid, and a locked stock is precisely the case
+    /// where being one tick off would misreport it as still trading.
+    var limitUp: Double? = nil
+    var limitDown: Double? = nil
     /// When the exchange says this quote was struck (not when we fetched it) —
     /// the difference matters for telling a live tick from a stale one.
     var quotedAt: Date? = nil
