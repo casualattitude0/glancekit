@@ -118,6 +118,28 @@ final class HoldingsSource {
         return nil
     }
 
+    /// The portfolio as JSON text, byte-for-byte what `save` would write.
+    ///
+    /// Deliberately routed through `merged` rather than re-encoding `Holdings`:
+    /// a `Codable` round trip would silently drop every key this app doesn't
+    /// model, and a copy that quietly loses fields is worse than no copy at all
+    /// — you'd only find out after pasting it back over the original. Going
+    /// through `merged` also means copy and save can never drift apart, since
+    /// there is only one place that decides what the file looks like.
+    ///
+    /// Reflects the current in-app state, including edits made here, because
+    /// that is what the panel is showing when you press the button.
+    func exportJSON() -> String? {
+        guard let holdings else { return nil }
+        let root = Self.merged(holdings, into: rawObject)
+        guard JSONSerialization.isValidJSONObject(root),
+              let data = try? JSONSerialization.data(
+                withJSONObject: root,
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
     /// Fold edited values into the file's own JSON, leaving everything this app
     /// doesn't model untouched.
     ///

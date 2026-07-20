@@ -520,6 +520,28 @@ struct StocksHoldingsSection: View {
     let plannedIDs: Set<String>
 
     @State private var isEditing = false
+    @State private var copied = false
+    /// Held so a second copy restarts the confirmation instead of inheriting
+    /// the first one's countdown and clearing early.
+    @State private var copiedReset: Task<Void, Never>?
+
+    private func copyJSON() {
+        guard let json = source.exportJSON() else { return }
+        // Clearing first is required, not tidiness: NSPasteboard keeps whatever
+        // types were written before, and a stale flavour can win when the
+        // destination app asks for something other than plain text.
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(json, forType: .string)
+
+        copiedReset?.cancel()
+        withAnimation(.easeOut(duration: 0.15)) { copied = true }
+        copiedReset = Task {
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.3)) { copied = false }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -536,6 +558,18 @@ struct StocksHoldingsSection: View {
                         Label("編輯", systemImage: "pencil")
                     }
                     .font(.caption).controlSize(.small).buttonStyle(.borderless)
+                }
+                if source.holdings != nil && !isEditing {
+                    Button { copyJSON() } label: {
+                        // The label doubles as the confirmation. A copy leaves
+                        // no visible trace anywhere else, and a button that
+                        // looks identical before and after reads as broken.
+                        Label(copied ? "已複製" : "複製",
+                              systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    .font(.caption).controlSize(.small).buttonStyle(.borderless)
+                    .foregroundStyle(copied ? Color.green : Color.accentColor)
+                    .help("複製完整持股 JSON，格式與原檔一致")
                 }
                 Button { source.chooseFile() } label: {
                     Label("匯入", systemImage: "square.and.arrow.down")
