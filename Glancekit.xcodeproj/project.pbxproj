@@ -281,6 +281,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Glancekit;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Glancekit reads the active tab of the browser you are using to record your browsing history.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Glancekit shows your next event in the menu bar.";
 				INFOPLIST_KEY_NSLocationUsageDescription = "Glancekit uses your location to show local weather.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Glancekit uses your location to show local weather.";
@@ -308,6 +309,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Glancekit;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Glancekit reads the active tab of the browser you are using to record your browsing history.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Glancekit shows your next event in the menu bar.";
 				INFOPLIST_KEY_NSLocationUsageDescription = "Glancekit uses your location to show local weather.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Glancekit uses your location to show local weather.";

@@ -38,6 +38,7 @@ struct GlancekitApp: App {
         registry.register(WeatherPlugin())
         registry.register(NotesPlugin())
         registry.register(ClipboardPlugin())
+        registry.register(BrowsingPlugin())
         registry.register(CurrencyPlugin())
         registry.register(FeedsPlugin())
         registry.register(TimersPlugin())
