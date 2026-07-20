@@ -46,6 +46,34 @@ enum StocksFormat {
         String(format: "%@%.2f%%", value >= 0 ? "+" : "−", abs(value))
     }
 
+    /// 漲跌 the way a broker terminal writes it: an arrow, the move in points,
+    /// then the percent. The arrow carries the sign, so the percent drops its
+    /// own — "▲50 +2.18%" says up twice and reads as clutter at caption size.
+    ///
+    /// Direction is the arrow's job specifically because colour can't be
+    /// trusted to do it alone: red-up/green-up is a per-market convention, and
+    /// on a menu-bar panel this is also the only cue that survives for someone
+    /// who can't separate the two hues.
+    static func changeLine(points: Double, percent: Double) -> String {
+        guard points != 0 else { return String(format: "0.00%%") }
+        return String(format: "%@%@ %.2f%%",
+                      points > 0 ? "▲" : "▼", price(abs(points)), abs(percent))
+    }
+
+    private static let lots: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    /// Accumulated volume in 張 — the unit the exchange reports and the unit
+    /// the strategy plan's volume conditions are written in, so no conversion
+    /// happens anywhere between the feed and the rule.
+    static func volume(_ lots: Double) -> String {
+        (Self.lots.string(from: NSNumber(value: lots)) ?? "\(Int(lots))") + " 張"
+    }
+
     static func time(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
@@ -81,10 +109,27 @@ struct StocksQuoteRow: View {
     /// inside the fade window leave the older timer running, and it clears the
     /// newer tick's colour early — the flash visibly cuts out mid-fade.
     @State private var fade: Task<Void, Never>?
-    /// Drives the blink itself: dropped to dim instantly, then eased back up.
-    /// Separate from `tick` because the two run on different clocks — the dim
-    /// is a single fast blink, the colour lingers long enough to be read.
+    /// Drives the filled flash: switched on instantly, then eased back out.
+    /// Separate from `tick` because the two run on different clocks — the fill
+    /// is one fast pulse, the tint lingers long enough afterwards to be read.
     @State private var blink = false
+
+    /// White while the cell is filled — a saturated green or red background
+    /// leaves green or red text unreadable — then the tick colour, then back
+    /// to normal once the tick has faded.
+    private var priceTint: Color {
+        if blink { return .white }
+        return tick.map { $0 ? Color.green : .red } ?? .primary
+    }
+
+    /// 漲停 / 跌停. Compared against the exchange's own published limits rather
+    /// than a recomputed ±10%, since TWSE rounds them onto the tick grid and
+    /// being a tick out here would report a locked stock as still trading.
+    private var limitState: (label: String, tint: Color)? {
+        if let up = quote.limitUp, quote.price >= up { return ("漲停", .green) }
+        if let down = quote.limitDown, quote.price <= down { return ("跌停", .red) }
+        return nil
+    }
 
     /// Motion is decoration here; the colour carries the meaning. So with
     /// Reduce Motion on, the tint still appears and still clears, it just does
@@ -111,25 +156,65 @@ struct StocksQuoteRow: View {
             Spacer(minLength: 4)
 
             VStack(alignment: .trailing, spacing: 1) {
-                // The flicker is confined to this one Text. Monospaced digits
-                // mean it can dim and recolour in place without the row
-                // reflowing, which is what makes a blink readable here rather
-                // than distracting.
-                Text(StocksFormat.price(quote.price))
-                    .font(.body.monospacedDigit())
-                    .contentTransition(.numericText())
-                    .foregroundStyle(tick.map { $0 ? Color.green : .red } ?? .primary)
-                    .opacity(blink ? 0.2 : 1)
-                Text(StocksFormat.signedPercent(quote.changePercent))
+                HStack(spacing: 4) {
+                    if let limit = limitState {
+                        Text(limit.label)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(limit.tint, in: RoundedRectangle(cornerRadius: 3))
+                    }
+
+                    // The flash fills the price cell the way a broker terminal
+                    // marks a print. Still confined to this one Text: the fill
+                    // is drawn as a background with negative padding, so it
+                    // bleeds past the glyphs without adding any layout of its
+                    // own and the row can't shift when it switches on.
+                    Text(StocksFormat.price(quote.price))
+                        .font(.body.monospacedDigit())
+                        .contentTransition(.numericText())
+                        .foregroundStyle(priceTint)
+                        .background {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(tick.map { $0 ? Color.green : .red } ?? .clear)
+                                .opacity(blink ? 0.9 : 0)
+                                .padding(.horizontal, -4)
+                                .padding(.vertical, -1)
+                        }
+                }
+                Text(StocksFormat.changeLine(points: quote.change,
+                                             percent: quote.changePercent))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(quote.isUp ? .green : .red)
                     .contentTransition(.numericText())
+                if let lots = quote.volumeLots {
+                    Text(StocksFormat.volume(lots))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .contentTransition(.numericText())
+                }
             }
             // Index levels run to five digits plus decimals, which wraps
             // mid-number in the 240pt menu column — "42671.2" above a lone "7".
             // Shrinking beats wrapping for a figure read at a glance.
             .lineLimit(1)
             .minimumScaleFactor(0.75)
+        }
+        // Two layers, on the same clock. The whole row washes faintly so the
+        // update is visible from across the panel without having to be looking
+        // at the price, and the price cell fills solidly so the eye lands on
+        // the number that actually moved. One alone reads as either too subtle
+        // to notice or too loud to sit through every few seconds.
+        //
+        // Negative padding again: the wash bleeds past the row's bounds rather
+        // than adding any, so nothing reflows when it switches on.
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tick.map { $0 ? Color.green : .red } ?? .clear)
+                .opacity(blink ? 0.18 : 0)
+                .padding(.horizontal, -6)
+                .padding(.vertical, -3)
         }
         .onChange(of: quote.price, initial: true) { _, price in
             // The first value a row ever shows isn't a tick — seeding silently
@@ -145,12 +230,13 @@ struct StocksQuoteRow: View {
             fade?.cancel()
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { tick = rising }
 
-            // Unanimated down, animated back up — that asymmetry is the blink.
-            // Skipped under Reduce Motion, where a rapid opacity swing is the
-            // exact thing being asked to stop; the colour still carries it.
+            // Unanimated on, animated off — that asymmetry is what reads as a
+            // flash rather than a throb. Skipped under Reduce Motion, where a
+            // hard flash is the exact thing being asked to stop; the tint,
+            // arrow and percent all still update.
             if !reduceMotion {
                 blink = true
-                withAnimation(.easeOut(duration: 0.24)) { blink = false }
+                withAnimation(.easeOut(duration: 0.45)) { blink = false }
             }
             fade = Task {
                 try? await Task.sleep(nanoseconds: 800_000_000)
