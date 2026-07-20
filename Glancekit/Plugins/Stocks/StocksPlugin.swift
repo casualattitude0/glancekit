@@ -1,6 +1,5 @@
 import SwiftUI
 import Observation
-import UserNotifications
 
 /// Flagship glance: a stock watchlist, and the front end for a daily Taiwan
 /// trading plan.
@@ -77,7 +76,7 @@ final class StocksPlugin: GlancePlugin {
         // Before the app finishes launching, which is when the notification
         // centre requires its delegate. Plugins are constructed during app
         // init, so this is the earliest hook available to one.
-        StockAlerts.prepare()
+        NotificationService.prepare()
         symbols = UserDefaults.standard.stringArray(forKey: watchlistKey)
             ?? ["TWSE-2330", "AAPL", "MSFT"]
         planSource.onChange = { [weak self] in
@@ -232,8 +231,8 @@ final class StocksPlugin: GlancePlugin {
             // Exits red, entries green — the colour is the first thing read.
             let tint: Color = alert.isApproach ? .orange
                 : (StocksFormat.tint(for: alert.levelKind))
-            StockAlerts.notify(title: alert.title, body: alert.body,
-                               identifier: alert.id, tint: tint)
+            NotificationService.post(title: alert.title, body: alert.body, tint: tint,
+                             identifier: alert.id, source: "stocks")
         }
     }
 
@@ -436,19 +435,7 @@ private struct StocksSettings: View {
     @State private var finnhubKey: String = ""
     @State private var approachText: String = ""
     @State private var savedNote: String?
-    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
-    @State private var diagnosticLine: String = "診斷載入中…"
 
-    private var statusText: String {
-        switch notificationStatus {
-        case .authorized: return "authorized"
-        case .denied: return "denied"
-        case .notDetermined: return "notDetermined"
-        case .provisional: return "provisional"
-        case .ephemeral: return "ephemeral"
-        @unknown default: return "unknown"
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -512,46 +499,11 @@ private struct StocksSettings: View {
 
             Divider()
 
-            HStack(spacing: 8) {
-                Button("測試通知") { StockAlerts.runDiagnostic() }
-                    .help("送出兩則：一則立刻（前景），一則 6 秒後（請切換到別的 App）")
-                Button("通知設定…") { StockAlerts.openSystemNotificationSettings() }
-                    .controlSize(.small)
-            }
-            // A denied permission is otherwise invisible: alerts just never
-            // arrive, which looks identical to "the market never moved".
-            Text("按下後請**立刻切換到別的 App**。第 1 則立刻送出測前景，第 2 則 6 秒後送出測背景。")
+            // Notification behaviour (panel, sound, system notification,
+            // permissions) lives in Settings → Notifications, since it is
+            // app-wide rather than a property of this glance.
+            Text("Notification appearance is configured in the Notifications page.")
                 .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 6) {
-                Text(verbatim: diagnosticLine)
-                    .font(.caption2.monospaced()).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("重新檢查") {
-                    Task { diagnosticLine = await StockAlerts.diagnostics().line }
-                }
-                .controlSize(.small).buttonStyle(.borderless).font(.caption2)
-            }
-
-            switch notificationStatus {
-            case .denied:
-                Label("通知權限被拒絕，橫幅不會出現。請到系統設定開啟。",
-                      systemImage: "bell.slash.fill")
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .notDetermined:
-                Text("尚未詢問通知權限——按一次「測試通知」即會詢問。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .authorized, .provisional, .ephemeral:
-                Text("通知權限正常。若只出現在通知中心而沒有橫幅，請在系統設定把提醒樣式改為「橫幅」或「提示」，並確認未開啟專注模式。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            @unknown default:
-                EmptyView()
-            }
 
             Divider()
 
@@ -577,11 +529,6 @@ private struct StocksSettings: View {
             finnhubKey = CredentialStore.get("finnhub.apiKey") ?? ""
             approachText = plugin.engine.approachBands
                 .map { String(format: "%g", $0) }.joined(separator: ", ")
-            Task {
-                let d = await StockAlerts.diagnostics()
-                diagnosticLine = d.line
-                notificationStatus = await StockAlerts.authorizationStatus()
-            }
         }
     }
 }
