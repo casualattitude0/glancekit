@@ -433,9 +433,12 @@ final class PowerPlugin: GlancePlugin {
         if alertFullCharge, isFull, plugged {
             if !firedFullChargeAlert {
                 firedFullChargeAlert = true
-                PowerAlerts.notify(
+                NotificationService.post(
                     title: "Battery fully charged",
-                    body: "Your Mac has reached 100%. You can unplug it."
+                    body: "Your Mac has reached 100%. You can unplug it.",
+                    tint: .green,
+                    identifier: "full-charge-\(UUID().uuidString.prefix(8))",
+                    source: "power"
                 )
             }
         } else if !plugged || snapshot.state == .discharging {
@@ -448,10 +451,13 @@ final class PowerPlugin: GlancePlugin {
             if t >= Double(overheatThreshold) {
                 if !overheatLatched {
                     overheatLatched = true
-                    PowerAlerts.notify(
+                    NotificationService.post(
                         title: "Battery running warm",
                         body: String(format: "Battery is %.1f°C (threshold %d°C).",
-                                     t, overheatThreshold)
+                                     t, overheatThreshold),
+                        tint: .orange,
+                        identifier: "overheat-\(UUID().uuidString.prefix(8))",
+                        source: "power"
                     )
                 }
             } else if t < Double(overheatThreshold) - 2 {
@@ -504,7 +510,15 @@ final class PowerPlugin: GlancePlugin {
         }
 
         lastReminderDate = Date()
-        PowerAlerts.notify(title: advice.headline, body: advice.reason)
+        // Fires repeatedly on the cooldown, so the identifier has to vary: an id
+        // still sitting in Notification Center would be rewritten in place and
+        // draw no banner, silencing exactly the reminders that recur.
+        NotificationService.post(
+            title: advice.headline,
+            body: advice.reason,
+            tint: advice.urgency == .urgent ? .red : .orange,
+            identifier: "charge-\(UUID().uuidString.prefix(8))",
+            source: "power")
     }
 
     /// The Smart Panel card is the advisor's verdict, not a raw battery readout:
