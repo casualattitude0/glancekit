@@ -68,18 +68,41 @@ struct TWSEQuoteProvider: QuoteProvider {
 
     private func quote(from e: MISEntry, displayedAs symbol: String) -> StockQuote? {
         let previousClose = num(e.y) ?? 0
-        // `z` is "-" whenever there's no trade yet (pre-open, or an illiquid
-        // stock mid-session). Falling back to the last matched price and then
-        // yesterday's close keeps the row showing a real number rather than 0,
-        // and — more importantly — keeps a bogus 0 out of the alert engine,
-        // where it would read as every downside level crossing at once.
-        guard let price = num(e.z) ?? num(e.pz) ?? (previousClose > 0 ? previousClose : nil) else {
+        // `z` is the last matched price *for the 5-second snapshot MIS is
+        // currently serving*, and it is "-" in any window where no match
+        // happened — which near the open, or on a thin stock, is most windows.
+        // Measured on 2330, 2026-07-20: `z=2320.0000, tv=1` at 09:22:00 and
+        // `z="-", tv="-"` at 09:22:05, with accumulated volume still climbing
+        // through both. So a blank `z` means "no trade in this window", never
+        // "no trade today", and the correct reading is the last one we saw.
+        //
+        // That carry-forward can't happen here — this struct is rebuilt on
+        // every fetch — so `tradePrice` reports whether this snapshot carried a
+        // real match and `StocksPlugin` holds the memory. It is also why the
+        // fallbacks below must not be mistaken for a traded price: the exchange's
+        // own front end (vendored in Asoul/tsrtc as `ctrl.fibest.js`) guards its
+        // price update with `item.z!="-"` and otherwise leaves the previous
+        // number on screen, rather than substituting anything from the book.
+        let tradePrice = num(e.z) ?? num(e.pz)
+
+        // Only reached before any trade is known: the app opening mid-session
+        // onto a blank window, or a stock that has not matched yet today. The
+        // five-deep book (`b` bids, `a` asks, best first) is the closest thing
+        // to a price at that point, then yesterday's close. Bid rather than the
+        // bid/ask midpoint — TWSE ticks are coarse (5.00 at 2330's level), so a
+        // midpoint invents an off-tick number no trade could occur at, and it
+        // errs to the conservative side of a stop-loss. A bogus 0 stays out
+        // entirely; in the alert engine it would read as every downside level
+        // crossing at once.
+        guard let price = tradePrice ?? best(e.b) ?? best(e.a)
+                ?? (previousClose > 0 ? previousClose : nil) else {
             return nil
         }
 
         return StockQuote(
             symbol: symbol,
             price: price,
+            tradePrice: tradePrice,
             previousClose: previousClose,
             currency: "TWD",
             series: [],
@@ -99,6 +122,14 @@ struct TWSEQuoteProvider: QuoteProvider {
         guard let s, s != "-", !s.isEmpty else { return nil }
         return Double(s)
     }
+
+    /// Best price from one side of the book. MIS packs the five levels into a
+    /// single underscore-joined string with a trailing separator
+    /// (`"2335.0000_2340.0000_…_"`), best first, and sends an empty string when
+    /// that side is empty — as it always is for the index, which has no book.
+    private func best(_ side: String?) -> Double? {
+        side?.split(separator: "_").first.flatMap { num(String($0)) }
+    }
 }
 
 // MARK: - Wire format
@@ -117,6 +148,8 @@ private struct MISEntry: Decodable {
     let ex: String?     // "tse" | "otc"
     let z: String?      // last traded price
     let pz: String?     // previous matched price (fallback when z is "-")
+    let b: String?      // bid book, five levels, "_"-joined, highest first
+    let a: String?      // ask book, five levels, "_"-joined, lowest first
     let y: String?      // previous close
     let o: String?      // open
     let h: String?      // day high

@@ -154,7 +154,17 @@ final class StocksPlugin: GlancePlugin {
             let fetched = try await TWSEQuoteProvider().fetchQuotes(keys)
             lastTaiwanFetch = Date()
             for var quote in fetched {
-                appendSeries(quote.price, for: quote.symbol)
+                // Read before `latest` is overwritten at the end of the loop.
+                let priorSnapshot = latest[quote.symbol]?.quotedAt
+                carryForwardLastTrade(into: &quote)
+                // One point per *exchange* snapshot, not per fetch. At the 5s
+                // cadence a repeated snapshot is the common case, and appending
+                // it would pad the sparkline with flat runs that read as the
+                // price standing still when it is only the feed that is.
+                // Sources without an exchange timestamp fall back to appending.
+                if quote.quotedAt == nil || quote.quotedAt != priorSnapshot {
+                    appendSeries(quote.price, for: quote.symbol)
+                }
                 quote.series = seriesBuffer[quote.symbol] ?? []
                 latest[quote.symbol] = quote
             }
@@ -197,6 +207,26 @@ final class StocksPlugin: GlancePlugin {
         } catch {
             errors.append(error.localizedDescription)
         }
+    }
+
+    /// Holds the last real matched price across the snapshots where MIS reports
+    /// none, so a stock that simply didn't trade in the last five seconds keeps
+    /// showing what it last traded at rather than dropping to an order-book
+    /// stand-in. This is the behaviour the exchange's own front end has, by
+    /// virtue of leaving the previously rendered number in the DOM.
+    ///
+    /// Guarded on `previousClose` rather than a stored date: it is the
+    /// exchange's own per-session constant, so an unchanged value means the
+    /// remembered trade belongs to the session being quoted. When it changes,
+    /// yesterday's last print is correctly abandoned — which matters because
+    /// `latest` outlives a session whenever the app is left running overnight.
+    private func carryForwardLastTrade(into quote: inout StockQuote) {
+        guard quote.tradePrice == nil,
+              let prior = latest[quote.symbol],
+              let priorTrade = prior.tradePrice,
+              prior.previousClose == quote.previousClose else { return }
+        quote.price = priorTrade
+        quote.tradePrice = priorTrade
     }
 
     private func appendSeries(_ price: Double, for key: String) {

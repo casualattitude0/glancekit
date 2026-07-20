@@ -9,6 +9,13 @@ import Foundation
 struct StockQuote: Identifiable, Equatable {
     let symbol: String
     var price: Double
+    /// `price` when it came from an actual match, nil when it was inferred
+    /// (an order-book stand-in, or yesterday's close). Taiwan's MIS feed blanks
+    /// its traded-price field in any 5-second window without a trade, so this
+    /// is what lets `StocksPlugin` hold the last real print across those gaps
+    /// instead of showing a number no one traded at. Sources that always quote
+    /// a real trade (Yahoo, Finnhub) leave it nil and simply don't use it.
+    var tradePrice: Double? = nil
     var previousClose: Double
     var currency: String
     /// Intraday closes, oldest → newest, used to draw the sparkline.
