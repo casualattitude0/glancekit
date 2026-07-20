@@ -15,6 +15,7 @@ enum SettingsSection {
     static let emphasis = "__emphasis__"
     static let shortcuts = "__shortcuts__"
     static let quickSwitch = "__quickswitch__"
+    static let notifications = "__notifications__"
 }
 
 /// The Settings window: a sidebar of sections beside a detail pane, matching the
@@ -43,6 +44,7 @@ struct SettingsView: View {
     private static let shortcutsSelection = SettingsSection.shortcuts
     private static let quickSwitchSelection = SettingsSection.quickSwitch
     private static let emphasisSelection = SettingsSection.emphasis
+    private static let notificationsSelection = SettingsSection.notifications
 
     /// The Assistant glance's id — promoted to a top-of-General sidebar entry.
     /// Its detail pane is its plugin `settingsSection()`, resolved the same way
@@ -113,6 +115,10 @@ struct SettingsView: View {
                 Label("Quick Switch", systemImage: "rectangle.stack")
                     .tag(Self.quickSwitchSelection)
                     .tutorialAnchor(SettingsSection.quickSwitch)
+                // App-wide: every glance raises alerts through the same module,
+                // so how they appear is one setting, not one per glance.
+                Label("Notifications", systemImage: "bell.badge")
+                    .tag(Self.notificationsSelection)
             }
 
             // One section per category, in `GlanceCategory` order, so the tools
@@ -159,6 +165,8 @@ struct SettingsView: View {
                     ShortcutsSettingsView()
                 } else if selection == Self.quickSwitchSelection {
                     QuickSwitchSettingsView()
+                } else if selection == Self.notificationsSelection {
+                    NotificationSettingsView()
                 } else if selection == Self.emphasisSelection {
                     EmphasisSettingsView()
                 } else if let plugin = registry.orderedPlugins.first(where: { $0.id == selection }) {
@@ -178,6 +186,7 @@ struct SettingsView: View {
         case Self.shortcutsSelection: "Shortcuts"
         case Self.quickSwitchSelection: "Quick Switch"
         case Self.emphasisSelection: "Emphasis"
+        case Self.notificationsSelection: "Notifications"
         case let id?: registry.plugin(id: id)?.title ?? "Glances"
         case nil: "Glances"
         }
