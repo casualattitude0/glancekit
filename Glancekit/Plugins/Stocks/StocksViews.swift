@@ -69,6 +69,15 @@ struct StocksQuoteRow: View {
     let quote: StockQuote
     var compact = true
 
+    /// Direction of the most recent tick, or nil once it has faded. Drives a
+    /// brief tint on the price so a change is visible at a glance — without it
+    /// a live number and a frozen one look identical, which is exactly the
+    /// ambiguity that made the stale-price bug hard to spot in the first place.
+    @State private var tick: Bool?
+    /// Compared against on each update. `quote` is a value, so the view has no
+    /// other way to know what the previous price was.
+    @State private var shownPrice: Double?
+
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
@@ -91,15 +100,33 @@ struct StocksQuoteRow: View {
             VStack(alignment: .trailing, spacing: 1) {
                 Text(StocksFormat.price(quote.price))
                     .font(.body.monospacedDigit())
+                    .contentTransition(.numericText())
+                    .foregroundStyle(tick.map { $0 ? Color.green : .red } ?? .primary)
                 Text(StocksFormat.signedPercent(quote.changePercent))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(quote.isUp ? .green : .red)
+                    .contentTransition(.numericText())
             }
             // Index levels run to five digits plus decimals, which wraps
             // mid-number in the 240pt menu column — "42671.2" above a lone "7".
             // Shrinking beats wrapping for a figure read at a glance.
             .lineLimit(1)
             .minimumScaleFactor(0.75)
+        }
+        .onChange(of: quote.price, initial: true) { _, price in
+            // The first value a row ever shows isn't a tick — seeding silently
+            // keeps every row from flashing green the moment the popover opens.
+            guard let previous = shownPrice else {
+                shownPrice = price
+                return
+            }
+            shownPrice = price
+            guard price != previous else { return }
+            withAnimation(.easeOut(duration: 0.2)) { tick = price > previous }
+            Task {
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                withAnimation(.easeIn(duration: 0.4)) { tick = nil }
+            }
         }
     }
 }
