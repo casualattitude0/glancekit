@@ -22,6 +22,8 @@ struct MarkdownEditor: NSViewRepresentable {
     @Binding var wantsFocus: Bool
     /// The point size the mono font is drawn at.
     var fontSize: CGFloat = 13
+    /// Spaces per indent level. ⇥ inserts this many; ⇧⇥ removes them.
+    var indentWidth: Int = 4
     /// Fires when ⌘↩ is pressed while editing — the popover saves the note.
     var onCommandReturn: () -> Void = {}
 
@@ -55,6 +57,7 @@ struct MarkdownEditor: NSViewRepresentable {
         // struct this closure would capture is the one from *this* runloop turn,
         // and `updateNSView` replaces `coordinator.parent` on every redraw.
         textView.onCommandReturn = { context.coordinator.parent.onCommandReturn() }
+        textView.indentWidth = indentWidth
 
         textView.isRichText = false
         textView.allowsUndo = true
@@ -87,6 +90,7 @@ struct MarkdownEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? FocusableTextView else { return }
 
         context.coordinator.parent = self
+        textView.indentWidth = indentWidth
 
         // Only overwrite the field when the model genuinely diverges (e.g. a
         // note was loaded for editing, or the draft cleared on save). Writing it
@@ -164,6 +168,9 @@ struct MarkdownEditor: NSViewRepresentable {
 /// takes first-responder when asked.
 private final class FocusableTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
+    /// Spaces per indent level for ⇥ / ⇧⇥.
+    var indentWidth: Int = 4
+    private var indentString: String { String(repeating: " ", count: max(1, indentWidth)) }
 
     override func keyDown(with event: NSEvent) {
         // ⌘↩ → save. Return alone stays a newline in the field.
@@ -172,5 +179,14 @@ private final class FocusableTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    // ⇥ indents the line(s) the selection touches; ⇧⇥ unindents them.
+    override func insertTab(_ sender: Any?) {
+        indentSelectedLines(with: indentString)
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        unindentSelectedLines(with: indentString)
     }
 }
