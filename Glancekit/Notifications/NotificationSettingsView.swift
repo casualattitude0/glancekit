@@ -9,31 +9,32 @@ import SwiftUI
 /// `SettingsView.detail`), so a `Form` here would nest its own scroller and
 /// insets inside those and sit misaligned against every other page.
 struct NotificationSettingsView: View {
+    @Environment(PluginRegistry.self) private var registry
     @Bindable private var prefs = NotificationService.preferences
     @State private var diagnostics = ""
 
+    /// Every glance, in the user's chosen order, each with its own mute switch.
+    /// The pinned Assistant is left out for the same reason the enable/reorder
+    /// lists drop it — it's an app-wide page, not a toggleable glance.
+    private var notifyingPlugins: [any GlancePlugin] {
+        registry.orderedPlugins.filter { $0.id != PluginRegistry.assistantPluginID }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Notifications")
-                .font(.headline)
-
-            Text("How glances tell you something happened. The on-screen panel is drawn by Glancekit itself, so Focus, notification summaries and the system alert style can't suppress it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            NotificationSettingsGroup(title: "On-screen panel") {
-                NotificationSettingsRow(
-                    title: "Show on-screen panel",
-                    detail: "A floating panel in the corner of the screen holding the pointer."
-                ) {
-                    Toggle("", isOn: $prefs.showsPanel)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
+        SettingsPage(
+            "Notifications",
+            intro: "How glances tell you something happened. The on-screen panel is drawn by Glancekit itself, so Focus, notification summaries and the system alert style can't suppress it."
+        ) {
+            SettingsCard("On-screen panel") {
+                SettingsToggleRow(
+                    "Show on-screen panel",
+                    detail: "A floating panel in the corner of the screen holding the pointer.",
+                    isOn: $prefs.showsPanel
+                )
 
                 if prefs.showsPanel {
                     Divider()
-                    NotificationSettingsRow(title: "Position") {
+                    SettingsRow("Position") {
                         Picker("", selection: $prefs.corner) {
                             ForEach(NotificationCorner.allCases) { corner in
                                 Text(corner.title).tag(corner)
@@ -47,7 +48,7 @@ struct NotificationSettingsView: View {
                     }
 
                     Divider()
-                    NotificationSettingsRow(title: "Dismiss after") {
+                    SettingsRow("Dismiss after") {
                         HStack(spacing: 8) {
                             Slider(value: $prefs.panelDuration, in: 4...30, step: 1)
                                 .frame(width: 140)
@@ -60,27 +61,36 @@ struct NotificationSettingsView: View {
                 }
             }
 
-            NotificationSettingsGroup(title: "System notification") {
-                NotificationSettingsRow(
-                    title: "Also post a system notification",
-                    detail: "Keeps a record in Notification Center. Whether macOS draws a banner for it is out of the app's hands."
-                ) {
-                    Toggle("", isOn: $prefs.postsSystemNotification)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
+            SettingsCard("System notification") {
+                SettingsToggleRow(
+                    "Also post a system notification",
+                    detail: "Keeps a record in Notification Center. Whether macOS draws a banner for it is out of the app's hands.",
+                    isOn: $prefs.postsSystemNotification
+                )
 
                 Divider()
-                NotificationSettingsRow(title: "Play a sound") {
-                    Toggle("", isOn: $prefs.playsSound)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
+                SettingsToggleRow("Play a sound", isOn: $prefs.playsSound)
             }
 
-            NotificationSettingsGroup(title: "Diagnostics") {
-                NotificationSettingsRow(
-                    title: "Test",
+            if !notifyingPlugins.isEmpty {
+                SettingsCard("Per glance") {
+                    ForEach(Array(notifyingPlugins.enumerated()), id: \.element.id) { index, plugin in
+                        if index > 0 { Divider() }
+                        SettingsToggleRow(
+                            plugin.title,
+                            isOn: Binding(
+                                get: { prefs.isSourceEnabled(plugin.id) },
+                                set: { prefs.setSourceEnabled(plugin.id, $0) }
+                            )
+                        )
+                    }
+                }
+                SettingsHelp("Muting a glance silences it on both paths — no on-screen panel and no Notification Center entry. Some glances don't raise notifications yet, so their switch has nothing to silence today.")
+            }
+
+            SettingsCard("Diagnostics") {
+                SettingsRow(
+                    "Test",
                     detail: "Sends one notification through both paths."
                 ) {
                     HStack(spacing: 8) {
@@ -112,13 +122,9 @@ struct NotificationSettingsView: View {
                 .padding(.vertical, 8)
             }
 
-            Text("If style is not banner or alert, macOS will never draw a banner for Glancekit and that has to be changed in System Settings. The on-screen panel is unaffected by it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsHelp("If style is not banner or alert, macOS will never draw a banner for Glancekit and that has to be changed in System Settings. The on-screen panel is unaffected by it.")
 
             Button("Reset to defaults") { prefs.resetToDefaults() }
-
-            Spacer(minLength: 0)
         }
         .onAppear { Task { await refresh() } }
         .onChange(of: prefs.showsPanel) { _, shows in
@@ -130,69 +136,5 @@ struct NotificationSettingsView: View {
 
     private func refresh() async {
         diagnostics = await NotificationService.diagnostics().line
-    }
-}
-
-/// A titled, bordered group — the same container `ShortcutsSettingsView` uses,
-/// so the two pages read as one design rather than two.
-private struct NotificationSettingsGroup<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 0) {
-                content
-            }
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(.quaternary)
-            )
-        }
-    }
-}
-
-/// One label-plus-control row, matching `ShortcutRow`'s metrics.
-///
-/// Controls share a 190pt trailing column so switches, pickers and buttons line
-/// up down the page instead of each ending wherever its own content happens to.
-private struct NotificationSettingsRow<Control: View>: View {
-    /// Every control sits in a column of this width, so switches, pickers,
-    /// sliders and buttons share one right edge down the page. Letting each
-    /// control size itself is what made them ragged.
-    static var controlColumn: CGFloat { 190 }
-
-    let title: String
-    var detail: String? = nil
-    @ViewBuilder var control: Control
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            control
-                .frame(width: Self.controlColumn, alignment: .trailing)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 }

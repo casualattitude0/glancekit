@@ -82,6 +82,11 @@ enum NotificationService {
                      identifier: String,
                      source: String,
                      sound: Bool = true) {
+        // A source the user has muted raises nothing at all — no beep, no panel,
+        // no Notification Center row. The test source is never listed in the
+        // per-glance UI, so it can never end up muted here.
+        guard preferences.isSourceEnabled(source) else { return }
+
         if sound, preferences.playsSound { NSSound.beep() }
 
         if preferences.showsPanel {

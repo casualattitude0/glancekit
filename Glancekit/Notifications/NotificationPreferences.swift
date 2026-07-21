@@ -56,6 +56,23 @@ final class NotificationPreferences {
         didSet { defaults.set(playsSound, forKey: Keys.sound) }
     }
 
+    /// Sources (glance `id`s) the user has silenced. Stored as the opt-*out* set
+    /// so the default — nothing listed — means every glance may notify, and a
+    /// brand-new notifying glance is on without needing a migration. A muted
+    /// source is suppressed on *both* paths (panel and Notification Center); see
+    /// `NotificationService.post`.
+    var mutedSources: Set<String> {
+        didSet { defaults.set(Array(mutedSources), forKey: Keys.mutedSources) }
+    }
+
+    /// Whether `source` is allowed to notify. Unknown sources notify by default.
+    func isSourceEnabled(_ source: String) -> Bool { !mutedSources.contains(source) }
+
+    /// Silence or un-silence one source's notifications.
+    func setSourceEnabled(_ source: String, _ enabled: Bool) {
+        if enabled { mutedSources.remove(source) } else { mutedSources.insert(source) }
+    }
+
     private let defaults: UserDefaults
 
     private enum Keys {
@@ -64,6 +81,7 @@ final class NotificationPreferences {
         static let duration = "glancekit.notifications.panelDuration"
         static let corner = "glancekit.notifications.corner"
         static let sound = "glancekit.notifications.playsSound"
+        static let mutedSources = "glancekit.notifications.mutedSources"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -75,6 +93,7 @@ final class NotificationPreferences {
         panelDuration = defaults.object(forKey: Keys.duration) as? Double ?? 12
         corner = NotificationCorner(rawValue: defaults.string(forKey: Keys.corner) ?? "") ?? .topRight
         playsSound = defaults.object(forKey: Keys.sound) as? Bool ?? true
+        mutedSources = Set(defaults.stringArray(forKey: Keys.mutedSources) ?? [])
     }
 
     func resetToDefaults() {
