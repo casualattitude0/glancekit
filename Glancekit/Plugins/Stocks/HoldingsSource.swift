@@ -43,7 +43,7 @@ final class HoldingsSource {
     /// are worse than none, because they look authoritative.
     var isStale: Bool {
         guard let updated = holdings?.updatedAt else { return false }
-        return updated != TWMarketClock.tradingDay()
+        return updated != Market.tw.tradingDay()
     }
 
     func start() {
@@ -63,8 +63,8 @@ final class HoldingsSource {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.json]
-        panel.prompt = "選擇"
-        panel.message = "選擇持股 JSON（holding.json）"
+        panel.prompt = "Choose"
+        panel.message = "Choose your holdings JSON (holding.json)"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         saveBookmark(for: url)
         adopt(url)
@@ -91,7 +91,7 @@ final class HoldingsSource {
     @discardableResult
     func save(_ edited: Holdings) -> String? {
         guard let url = scopedURL ?? resolveBookmark() else {
-            return "尚未選擇持股檔，無法儲存"
+            return "No holdings file chosen — nothing to save to"
         }
 
         let root = Self.merged(edited, into: rawObject)
@@ -99,7 +99,7 @@ final class HoldingsSource {
               let data = try? JSONSerialization.data(
                 withJSONObject: root,
                 options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) else {
-            return "無法產生 JSON"
+            return "Couldn't produce valid JSON"
         }
 
         // Suppress the reload our own write is about to trigger.
@@ -108,7 +108,7 @@ final class HoldingsSource {
             try data.write(to: url, options: [.atomic])
         } catch {
             ignoreReloadsUntil = nil
-            return "寫入失敗：\(error.localizedDescription)"
+            return "Write failed: \(error.localizedDescription)"
         }
 
         rawObject = root
@@ -149,7 +149,7 @@ final class HoldingsSource {
     static func merged(_ edited: Holdings, into raw: [String: Any]?) -> [String: Any] {
         var root = raw ?? [:]
         // Editing makes the file current by definition.
-        root["updatedAt"] = edited.updatedAt ?? TWMarketClock.tradingDay()
+        root["updatedAt"] = edited.updatedAt ?? Market.tw.tradingDay()
         if let cash = edited.cash { root["cash"] = cash } else { root["cash"] = NSNull() }
 
         // Merge per position by stockId so unknown per-position keys survive.
@@ -201,9 +201,9 @@ final class HoldingsSource {
             holdings = decoded
             let unparsed = decoded.positions.filter { $0.symbol == nil }.map(\.stockId)
             error = unparsed.isEmpty ? nil
-                : "無法辨識代號：\(unparsed.joined(separator: "、"))"
+                : "Unrecognized symbols: \(unparsed.joined(separator: ", "))"
         } catch {
-            self.error = "持股讀取失敗：\(error.localizedDescription)"
+            self.error = "Couldn't read holdings: \(error.localizedDescription)"
         }
         onChange?()
     }

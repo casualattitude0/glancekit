@@ -5,7 +5,7 @@ import Observation
 /// the notification itself.
 struct StrategyAlert: Identifiable, Equatable {
     let id: String              // also the dedupe key
-    let symbol: TWSymbol
+    let symbol: MarketSymbol
     let stockName: String
     let levelKind: String
     let title: String
@@ -71,7 +71,7 @@ final class StrategyEngine {
     private let firedDateKey = "glancekit.stocks.firedPlanDate"
 
     /// Previous tick's price per symbol. Absent means "not yet seeded".
-    private var lastPrice: [TWSymbol: Double] = [:]
+    private var lastPrice: [MarketSymbol: Double] = [:]
     /// Dedupe keys already fired for the current plan date.
     private var fired: Set<String> = []
     /// The plan date the `fired` set belongs to.
@@ -129,13 +129,13 @@ final class StrategyEngine {
     /// Evaluate one tick. Returns the alerts that fired (already deduped);
     /// the caller is responsible for delivering them.
     func evaluate(plan: StrategyPlan,
-                  quotes: [TWSymbol: StockQuote],
+                  quotes: [MarketSymbol: StockQuote],
                   now: Date = Date()) async -> [StrategyAlert] {
 
         rollOverIfNeeded(planDate: plan.date)
 
         var alerts: [StrategyAlert] = []
-        let atClose = TWMarketClock.isCloseWindow(now) || TWMarketClock.isAfterClose(now)
+        let atClose = Market.tw.isCloseWindow(now) || Market.tw.isAfterClose(now)
 
         // MARK: Market gate
         //
@@ -158,13 +158,13 @@ final class StrategyEngine {
                     fired.insert(key)
                     let isFinal = index == gate.rungs.count - 1
                     alerts.append(StrategyAlert(
-                        id: key, symbol: .taiex, stockName: "加權指數", levelKind: "gate",
-                        title: "大盤跌破 \(fmt(rung))　現 \(fmt(taiex.price))"
-                            + (isFinal ? " · 新倉停止" : ""),
+                        id: key, symbol: .taiex, stockName: "TAIEX", levelKind: "gate",
+                        title: "TAIEX broke below \(fmt(rung)) · now \(fmt(taiex.price))"
+                            + (isFinal ? " · new positions halted" : ""),
                         body: [
-                            isFinal ? "新倉 entry / add / reentry 通知已停止。"
-                                    : "第 \(index + 1)/\(gate.rungs.count) 道關卡，新倉尚未停止。",
-                            gate.source.map { "依據：\($0)" },
+                            isFinal ? "Entry / add / re-entry alerts are now suppressed."
+                                    : "Rung \(index + 1) of \(gate.rungs.count) — new positions are not halted yet.",
+                            gate.source.map { "Basis: \($0)" },
                             gate.rule
                         ].compactMap { $0 }.joined(separator: "\n"),
                         price: taiex.price, firedAt: now))
@@ -264,7 +264,7 @@ final class StrategyEngine {
 
     /// The number this trigger compares against — a literal from the plan, or a
     /// moving average recomputed from daily bars.
-    private func resolveLine(_ trigger: ResolvedTrigger, symbol: TWSymbol) async -> Double? {
+    private func resolveLine(_ trigger: ResolvedTrigger, symbol: MarketSymbol) async -> Double? {
         // The plan's own number wins whenever it is present, including on a
         // `ref: ma20` trigger.
         //
@@ -280,7 +280,7 @@ final class StrategyEngine {
 
     private func matches(_ trigger: ResolvedTrigger,
                          line: Double?,
-                         symbol: TWSymbol,
+                         symbol: MarketSymbol,
                          quote: StockQuote,
                          previous: Double?,
                          atClose: Bool) async -> Bool {
@@ -324,16 +324,16 @@ final class StrategyEngine {
     /// Daily closes with today's price appended when the exchange hasn't
     /// published today's bar yet (the sweep runs at 14:00; the close window
     /// starts at 13:25).
-    private func closesIncludingToday(symbol: TWSymbol, todayPrice: Double) async -> [Double] {
+    private func closesIncludingToday(symbol: MarketSymbol, todayPrice: Double) async -> [Double] {
         let bars = await history.recentBars(20, for: symbol)
-        let today = TWMarketClock.tradingDay()
+        let today = Market.tw.tradingDay()
         var closes = bars.map(\.close)
         if bars.last?.date != today { closes.append(todayPrice) }
         return closes
     }
 
     private func volumeSatisfied(_ trigger: ResolvedTrigger,
-                                 symbol: TWSymbol,
+                                 symbol: MarketSymbol,
                                  quote: StockQuote) async -> Bool {
         guard let condition = trigger.volume else { return true }
         // A volume condition we can't measure must not silently pass — that
@@ -363,7 +363,7 @@ final class StrategyEngine {
     /// Strictly "cannot fire", not merely "uses history": a `ref: ma20` level
     /// that also carries a literal price still fires off that literal, and
     /// labelling it as blocked would be its own kind of lie.
-    private func isMissingHistory(_ trigger: ResolvedTrigger, symbol: TWSymbol) async -> Bool {
+    private func isMissingHistory(_ trigger: ResolvedTrigger, symbol: MarketSymbol) async -> Bool {
         if let days = trigger.reference.days, trigger.price == nil,
            await history.movingAverage(days, for: symbol) == nil { return true }
         if let v = trigger.volume, v.multiple != nil || v.maxMultiple != nil {
@@ -391,7 +391,7 @@ final class StrategyEngine {
     private func approachAlert(_ trigger: ResolvedTrigger,
                                line: Double?,
                                stock: StrategyPlan.StockPlan,
-                               symbol: TWSymbol,
+                               symbol: MarketSymbol,
                                quote: StockQuote,
                                plan: StrategyPlan,
                                now: Date) -> StrategyAlert? {
@@ -434,11 +434,11 @@ final class StrategyEngine {
         return StrategyAlert(
             id: key, symbol: symbol, stockName: stock.displayName,
             levelKind: trigger.kind,
-            title: "\(stock.displayName) \(symbol.code) · 接近\(label) \(fmt(line))"
+            title: "\(stock.displayName) \(symbol.code) · nearing \(label) \(fmt(line))"
                 + (stock.levels?[trigger.kind]?.size?.action.map { " · \($0)" } ?? ""),
             body: [
-                "距離 \(fmt(distance)) 元 / \(String(format: "%.2f", distance / line * 100))%"
-                    + "（現價 \(fmt(price))）",
+                "\(money(distance, symbol.market)) / \(String(format: "%.2f", distance / line * 100))% away"
+                    + " (now \(fmt(price)))",
                 stock.levels?[trigger.kind]?.size?.summary.map { summary in
                     let cascaded = ShareMath.instructions(
                         levels: stock.levels ?? [:],
@@ -446,9 +446,9 @@ final class StrategyEngine {
                         holding: holdings?.position(for: symbol),
                         price: price, cash: holdings?.cash)
                     let shares = ShareMath.describe(cascaded[trigger.kind])
-                    return "屆時執行：\(summary)" + (shares.map { " ≈ \($0)" } ?? "")
+                    return "Then execute: \(summary)" + (shares.map { " ≈ \($0)" } ?? "")
                 },
-                trigger.onClose ? "提醒：此關卡需收盤確認才會正式觸發。" : nil,
+                trigger.onClose ? "Note: this level needs a confirmed close before it fires." : nil,
                 stock.levels?[trigger.kind]?.condition
             ].compactMap { $0 }.joined(separator: "\n"),
             price: price, firedAt: now,
@@ -465,7 +465,7 @@ final class StrategyEngine {
 
     // MARK: - Alert construction
 
-    private func makeAlert(key: String, symbol: TWSymbol, stock: StrategyPlan.StockPlan,
+    private func makeAlert(key: String, symbol: MarketSymbol, stock: StrategyPlan.StockPlan,
                            kind: String, level: PlanLevel, line: Double?,
                            quote: StockQuote, instruction: ShareInstruction?,
                            now: Date) -> StrategyAlert {
@@ -478,21 +478,23 @@ final class StrategyEngine {
 
         // The share count goes in the title next to the fraction: "+1/3" is the
         // plan's language, "36 股" is what you actually type into a broker.
-        if let shares = instruction?.shares { title += "（\(shares) 股）" }
+        if let shares = instruction?.shares { title += " (\(shares) sh)" }
 
         var lines: [String] = []
         if let summary = level.size?.summary {
-            var execution = "執行：\(summary)"
+            var execution = "Execute: \(summary)"
             if let detail = ShareMath.describe(instruction) { execution += " ≈ \(detail)" }
-            if let max = stock.positionPath?.max { execution += "（上限 \(max)）" }
+            if let max = stock.positionPath?.max { execution += " (cap \(max))" }
             lines.append(execution)
         }
-        if let line { lines.append("觸發線 \(fmt(line))　現價 \(fmt(quote.price))") }
-        if let lots = quote.volumeLots { lines.append("量 \(Int(lots)) 張") }
+        if let line { lines.append("Trigger \(fmt(line)) · now \(fmt(quote.price))") }
+        if let volume = quote.volume {
+            lines.append("Volume \(StocksFormat.volume(volume, unit: quote.volumeUnit))")
+        }
         // The prose is the payload — everything above is just the trigger's
         // receipt. This is the part you actually read before deciding.
         if let condition = level.condition { lines.append(condition) }
-        if let source = level.source { lines.append("依據：\(source)") }
+        if let source = level.source { lines.append("Basis: \(source)") }
         if let note = stock.positionPath?.note { lines.append(note) }
 
         return StrategyAlert(id: key, symbol: symbol, stockName: stock.displayName,
@@ -501,16 +503,17 @@ final class StrategyEngine {
                              price: quote.price, firedAt: now)
     }
 
+    /// The long form, for a notification that has room for it. The ladder and
+    /// the level rows use `StocksFormat.levelLabel`, which is the same
+    /// vocabulary abbreviated — one place decides what each level is called.
     private func label(for kind: String) -> String {
-        switch kind {
-        case "entry": return "進場"
-        case "add": return "加碼"
-        case "trim": return "減碼"
-        case "reduce": return "減倉"
-        case "cut": return "停損"
-        case "reentry": return "重新進場"
-        default: return kind
-        }
+        kind == "reentry" ? "Re-entry" : StocksFormat.levelLabel(kind)
+    }
+
+    /// A distance in the symbol's own currency, so a Tokyo alert doesn't quote
+    /// New Taiwan dollars.
+    private func money(_ value: Double, _ market: Market) -> String {
+        "\(market.currencySymbol)\(fmt(value))"
     }
 
     private func orderedKinds(of levels: [String: PlanLevel]) -> [String] {

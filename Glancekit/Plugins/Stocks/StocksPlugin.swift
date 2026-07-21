@@ -1,18 +1,22 @@
 import SwiftUI
 import Observation
 
-/// Flagship glance: a stock watchlist, and the front end for a daily Taiwan
-/// trading plan.
+/// Flagship glance: a multi-market stock watchlist, and the front end for a
+/// daily trading plan.
 ///
 /// - Data sources: Taiwan symbols go to `TWSEQuoteProvider` (the exchange's own
-///   MIS feed); everything else keeps using `YahooQuoteProvider`, or
-///   `FinnhubQuoteProvider` when a key is present in `CredentialStore`. Routing
-///   is per symbol, so one watchlist can hold `TWSE-2330` and `AAPL`.
+///   MIS feed); US and Japanese symbols go to `YahooQuoteProvider`, with
+///   `FinnhubQuoteProvider` taking over the US leg when a key is present in
+///   `CredentialStore`. Routing is per symbol, so one watchlist can hold
+///   `TWSE-2330`, `AAPL` and `TSE-7203` at once.
+/// - Cadence is per market, from `Market.cadence`: each market polls on its own
+///   clock, and one whose session has ended drops to a token refresh instead of
+///   spending a budget nobody is watching.
 /// - Strategy: `StrategyPlanSource` watches a plan file on disk;
 ///   `StrategyEngine` evaluates it against each tick and pushes a notification
 ///   when a level is reached.
-/// - Popover: per-symbol rows, plus a plan section showing how far the price is
-///   from each level.
+/// - Popover: per-symbol rows, the portfolio, plus a plan section showing how
+///   far the price is from each level.
 ///
 /// This is the reference implementation cited in `Core/PLUGIN_CONTRACT.md`.
 @MainActor
@@ -22,11 +26,11 @@ final class StocksPlugin: GlancePlugin {
     nonisolated var title: String { "Stocks" }
     nonisolated var iconSystemName: String { "chart.line.uptrend.xyaxis" }
 
-    /// 5s — the floor MIS declares for itself via `userDelay: 5000`, and the
-    /// fastest cadence the documented budget allows without eating into it.
-    /// The whole watchlist rides one pipe-joined request, so this spends 1 of
-    /// the 3 requests per 5-second window however many symbols are listed,
-    /// leaving the history sweep room to share the same gate.
+    /// 5s — the floor Taiwan's MIS declares for itself via `userDelay: 5000`,
+    /// and the fastest cadence the documented budget allows without eating into
+    /// it. The whole Taiwan watchlist rides one pipe-joined request, so this
+    /// spends 1 of the 3 requests per 5-second window however many symbols are
+    /// listed, leaving the history sweep room to share the same gate.
     ///
     /// Polling at the floor does *not* mean a new price every tick: the
     /// exchange's snapshot can sit unchanged for 25s at a stretch (measured
@@ -37,9 +41,9 @@ final class StocksPlugin: GlancePlugin {
     /// A fixed, short cadence — deliberately *not* computed from market hours.
     /// `RefreshCoordinator` reads this once when it builds the loop
     /// (`Core/RefreshCoordinator.swift`), so a value that varies with the clock
-    /// is frozen at whatever it was at launch. The real cadence is enforced
-    /// inside `refresh()`, which is also where it belongs: that's where the
-    /// rate-limit budget is spent.
+    /// is frozen at whatever it was at launch. The real per-market cadence is
+    /// enforced inside `refresh()`, which is also where it belongs: that's where
+    /// the rate-limit budget is spent.
     var refreshInterval: TimeInterval { 5 }
 
     /// Room for the two-pane plan board (a stock list beside its detail panel).
@@ -55,20 +59,6 @@ final class StocksPlugin: GlancePlugin {
     /// making every other glance's Quick Switch window bigger.
     var preferredToolWindowSize: CGSize? { CGSize(width: 520, height: 640) }
 
-    /// The cadence the popover counts down to. `shouldFetchTaiwan` gates a
-    /// little under this so loop jitter can never skip a tick; the number shown
-    /// is the loop's own interval, which is what actually reaches the screen.
-    var taiwanCadence: TimeInterval { TWMarketClock.isOpen() ? refreshInterval : 900 }
-
-    /// The exchange's own timestamp on the freshest Taiwan quote we hold.
-    ///
-    /// Distinct from `lastTaiwanFetch`, and the gap between them is the point:
-    /// MIS stamps its snapshots 5–6s behind its own clock and only advances
-    /// them every 15–20s (measured 2026-07-20), so a quote that arrived just
-    /// now can still be twenty seconds old. Surfacing this stops that showing
-    /// up as an unexplained lag between the panel and a broker terminal.
-    var taiwanQuotedAt: Date? { latest.values.compactMap(\.quotedAt).max() }
-
     /// Which plan stock the detail panel is showing. Lives on the plugin rather
     /// than in `@State` so the selection survives moving between the popover,
     /// the tool window and Quick Switch — all three render the same section, and
@@ -83,14 +73,17 @@ final class StocksPlugin: GlancePlugin {
 
     private(set) var quotes: [StockQuote] = []
     private(set) var lastError: String?
-    private(set) var lastTaiwanFetch: Date?
+
+    /// When each market last answered. Per market rather than global: a Tokyo
+    /// feed that has gone quiet must not be masked by New York still ticking.
+    private(set) var lastFetch: [Market: Date] = [:]
 
     let planSource = StrategyPlanSource()
     let holdingsSource = HoldingsSource()
     let engine = StrategyEngine()
 
-    /// Intraday prices accumulated tick by tick, so Taiwan rows get a sparkline
-    /// even though MIS only ever reports a single point.
+    /// Intraday prices accumulated tick by tick, so rows get a sparkline even
+    /// from sources that only ever report a single point (Taiwan's MIS, Finnhub).
     private var seriesBuffer: [String: [Double]] = [:]
     /// One point per distinct exchange snapshot, so the cap counts *ticks* and
     /// no longer has to be retuned whenever `refreshInterval` changes. A quiet
@@ -100,7 +93,6 @@ final class StocksPlugin: GlancePlugin {
     /// session at one snapshot every ~20s.
     private static let seriesCap = 720
 
-    private var lastForeignFetch: Date?
     private var lastHistorySweepDay: String?
     private var lastHistoryCloseSweepDay: String?
 
@@ -110,7 +102,7 @@ final class StocksPlugin: GlancePlugin {
         // init, so this is the earliest hook available to one.
         NotificationService.prepare()
         symbols = UserDefaults.standard.stringArray(forKey: watchlistKey)
-            ?? ["TWSE-2330", "AAPL", "MSFT"]
+            ?? ["TWSE-2330", "AAPL", "TSE-7203"]
         planSource.onChange = { [weak self] in
             // A newly loaded plan must not be judged against prices remembered
             // from the previous one.
@@ -131,8 +123,11 @@ final class StocksPlugin: GlancePlugin {
 
     func refresh() async {
         var errors: [String] = []
-        await refreshTaiwan(collecting: &errors)
-        await refreshForeign(collecting: &errors)
+        // Markets in a fixed order so an error string doesn't reshuffle itself
+        // between ticks and read as new information.
+        for market in Market.allCases {
+            await refresh(market, collecting: &errors)
+        }
 
         // Preserve watchlist order, then append plan-only symbols (which the
         // user never typed into the watchlist but is actively tracking).
@@ -149,103 +144,125 @@ final class StocksPlugin: GlancePlugin {
         await sweepHistoryIfDue()
     }
 
-    /// Most recent quote per watchlist key, across both providers.
+    /// Most recent quote per watchlist key, across every provider.
     private var latest: [String: StockQuote] = [:]
 
     // MARK: Fetching
 
-    /// Every Taiwan symbol we need quoted: the watchlist's, the plan's, and the
-    /// index when the plan has a market gate. All of them ride in one request.
-    private func taiwanKeys() -> [String] {
-        var keys: [String] = symbols.filter { TWSymbol($0) != nil }
-        for stock in planSource.plan?.plans ?? [] where TWSymbol(stock.stockId) != nil {
-            keys.append(stock.stockId)
-        }
+    /// Every symbol we need quoted, grouped by market: the watchlist's, the
+    /// plan's, everything held, and the index when the plan has a market gate.
+    ///
+    /// Deduped on the *parsed* symbol rather than the text, so `2330`,
+    /// `2330.TW` and `TWSE-2330` cost one quote between them however many of
+    /// those spellings are floating around a plan and a portfolio.
+    private func keysByMarket() -> [Market: [String]] {
+        var keys: [String] = symbols
+        for stock in planSource.plan?.plans ?? [] { keys.append(stock.stockId) }
         // Everything held, not just everything planned — a position with no
         // plan still has a price, and its P/L is half the reason to look here.
-        for position in holdingsSource.holdings?.positions ?? [] where TWSymbol(position.stockId) != nil {
-            keys.append(position.stockId)
-        }
+        for position in holdingsSource.holdings?.positions ?? [] { keys.append(position.stockId) }
         // Any gate at all — `line` or a `ladder` — means the index must be quoted.
         if planSource.plan?.market?.gate?.rungs.isEmpty == false { keys.append("TAIEX") }
 
-        var seen = Set<TWSymbol>()
-        return keys.filter { key in
-            guard let symbol = TWSymbol(key), !seen.contains(symbol) else { return false }
+        var seen = Set<MarketSymbol>()
+        var out: [Market: [String]] = [:]
+        for key in keys {
+            guard let symbol = MarketSymbol(key), !seen.contains(symbol) else { continue }
             seen.insert(symbol)
-            return true
+            out[symbol.market, default: []].append(key)
         }
+        return out
     }
 
-    private func refreshTaiwan(collecting errors: inout [String]) async {
-        let keys = taiwanKeys()
-        guard !keys.isEmpty else { return }
-        guard shouldFetchTaiwan() else { return }
+    /// Which markets this glance is currently watching, in a stable order —
+    /// what the feed-status rows are drawn from.
+    var activeMarkets: [Market] {
+        let present = Set(keysByMarket().keys)
+        return Market.allCases.filter { present.contains($0) }
+    }
+
+    /// The exchange's own timestamp on the freshest quote we hold for a market.
+    ///
+    /// Distinct from `lastFetch`, and the gap between them is the point: Taiwan's
+    /// MIS stamps its snapshots 5–6s behind its own clock and only advances them
+    /// every 15–20s (measured 2026-07-20), so a quote that arrived just now can
+    /// still be twenty seconds old. Surfacing this stops that showing up as an
+    /// unexplained lag against a broker terminal.
+    func quotedAt(for market: Market) -> Date? {
+        latest.values.filter { $0.market == market }.compactMap(\.quotedAt).max()
+    }
+
+    private func refresh(_ market: Market, collecting errors: inout [String]) async {
+        guard let keys = keysByMarket()[market], !keys.isEmpty else { return }
+        guard shouldFetch(market) else { return }
 
         do {
-            let fetched = try await TWSEQuoteProvider().fetchQuotes(keys)
-            lastTaiwanFetch = Date()
+            let fetched = try await provider(for: market).fetchQuotes(keys)
+            lastFetch[market] = Date()
             for var quote in fetched {
                 // Read before `latest` is overwritten at the end of the loop.
                 let priorSnapshot = latest[quote.symbol]?.quotedAt
                 carryForwardLastTrade(into: &quote)
-                // One point per *exchange* snapshot, not per fetch. At the 5s
-                // cadence a repeated snapshot is the common case, and appending
-                // it would pad the sparkline with flat runs that read as the
-                // price standing still when it is only the feed that is.
+                // One point per *exchange* snapshot, not per fetch. At Taiwan's
+                // 5s cadence a repeated snapshot is the common case, and
+                // appending it would pad the sparkline with flat runs that read
+                // as the price standing still when it is only the feed that is.
                 // Sources without an exchange timestamp fall back to appending.
                 if quote.quotedAt == nil || quote.quotedAt != priorSnapshot {
                     appendSeries(quote.price, for: quote.symbol)
                 }
-                quote.series = seriesBuffer[quote.symbol] ?? []
+                // Only fill in our own sampled series where the source gave
+                // none. Yahoo returns a real 5-minute intraday curve, and
+                // overwriting it with a handful of points we happened to poll
+                // would be a strictly worse chart.
+                if quote.series.count < 2 {
+                    quote.series = seriesBuffer[quote.symbol] ?? []
+                }
                 latest[quote.symbol] = quote
             }
-            if fetched.isEmpty { errors.append("台股無回傳資料") }
+            if fetched.isEmpty { errors.append("\(market.badge): no data returned") }
         } catch {
-            errors.append(error.localizedDescription)
+            errors.append("\(market.badge): \(error.localizedDescription)")
         }
     }
 
-    /// The rate-limit decision, in one place. During the session we poll on the
-    /// glance's cadence; outside it we drop to a token refresh every 15 minutes
-    /// so the popover still shows the last close without spending a budget
-    /// nobody is watching. One request covers every symbol either way.
-    private func shouldFetchTaiwan(now: Date = Date()) -> Bool {
-        guard let last = lastTaiwanFetch else { return true }
-        let elapsed = now.timeIntervalSince(last)
-        return TWMarketClock.isOpen(now) ? elapsed >= 4.5 : elapsed >= 900
-    }
-
-    private func refreshForeign(collecting errors: inout [String]) async {
-        let foreign = symbols.filter { TWSymbol($0) == nil }
-        guard !foreign.isEmpty else { return }
-
-        // The 20s loop exists for Taiwan; US names don't need it and Yahoo
-        // shouldn't be asked that often either.
-        if let last = lastForeignFetch,
-           Date().timeIntervalSince(last) < (usMarketProbablyOpen ? 60 : 900) { return }
-
-        let provider: QuoteProvider
-        if let key = CredentialStore.get("finnhub.apiKey"), !key.isEmpty {
-            provider = FinnhubQuoteProvider(apiKey: key)
-        } else {
-            provider = YahooQuoteProvider()
-        }
-        do {
-            let fetched = try await provider.fetchQuotes(foreign)
-            lastForeignFetch = Date()
-            for quote in fetched { latest[quote.symbol] = quote }
-            if fetched.isEmpty { errors.append("No data returned") }
-        } catch {
-            errors.append(error.localizedDescription)
+    /// Taiwan rides its exchange's own feed; everything else goes to Yahoo,
+    /// except US names once a Finnhub key exists. Finnhub's free tier doesn't
+    /// cover Taipei or Tokyo, so it is never asked about them — an empty answer
+    /// there would look like a dead feed rather than an unsupported market.
+    private func provider(for market: Market) -> QuoteProvider {
+        switch market {
+        case .tw:
+            return TWSEQuoteProvider()
+        case .us:
+            if let key = CredentialStore.get("finnhub.apiKey"), !key.isEmpty {
+                return FinnhubQuoteProvider(apiKey: key)
+            }
+            return YahooQuoteProvider()
+        case .jp:
+            return YahooQuoteProvider()
         }
     }
 
-    /// Holds the last real matched price across the snapshots where MIS reports
-    /// none, so a stock that simply didn't trade in the last five seconds keeps
-    /// showing what it last traded at rather than dropping to an order-book
-    /// stand-in. This is the behaviour the exchange's own front end has, by
-    /// virtue of leaving the previously rendered number in the DOM.
+    /// The rate-limit decision, in one place. During a session we poll on the
+    /// market's own cadence; outside it we drop to a token refresh so the
+    /// popover still shows the last close.
+    ///
+    /// The 10% slack is what stops loop jitter from skipping a tick: the refresh
+    /// loop fires on a fixed 5s timer, and a strict "has a full 5s elapsed" test
+    /// misses by a millisecond often enough to halve the effective cadence.
+    private func shouldFetch(_ market: Market, now: Date = Date()) -> Bool {
+        guard let last = lastFetch[market] else { return true }
+        return now.timeIntervalSince(last) >= market.cadence(now) * 0.9
+    }
+
+    /// Holds the last real matched price across the snapshots where a feed
+    /// reports none, so a stock that simply didn't trade in the last five
+    /// seconds keeps showing what it last traded at rather than dropping to an
+    /// order-book stand-in. This is the behaviour the Taiwan exchange's own
+    /// front end has, by virtue of leaving the previously rendered number in the
+    /// DOM. Sources that always quote a real trade set `tradePrice`, and never
+    /// reach the body of this.
     ///
     /// Guarded on `previousClose` rather than a stored date: it is the
     /// exchange's own per-session constant, so an unchanged value means the
@@ -259,10 +276,11 @@ final class StocksPlugin: GlancePlugin {
               prior.previousClose == quote.previousClose else { return }
 
         // A remembered print is only worth showing while the live book still
-        // agrees with it. `z` can stay blank for minutes at a stretch, and over
-        // that span the market can walk away from the last trade entirely — at
-        // which point carrying it forward stops being "the last price" and
-        // becomes a stale one, which is the delay it would look like on screen.
+        // agrees with it. The traded-price field can stay blank for minutes at a
+        // stretch, and over that span the market can walk away from the last
+        // trade entirely — at which point carrying it forward stops being "the
+        // last price" and becomes a stale one, which is the delay it would look
+        // like on screen.
         //
         // A real trade happens at the bid or the ask, so a print outside the
         // current spread has been overtaken by definition. Clamping to the near
@@ -289,7 +307,7 @@ final class StocksPlugin: GlancePlugin {
         let known = Set(symbols)
         return (planSource.plan?.plans ?? [])
             .map(\.stockId)
-            .filter { !known.contains($0) && TWSymbol($0) != nil }
+            .filter { !known.contains($0) && MarketSymbol($0) != nil }
     }
 
     // MARK: Strategy
@@ -299,15 +317,17 @@ final class StocksPlugin: GlancePlugin {
         // Reviewing a past day's plan must not fire today's notifications off
         // its levels. `activatePinned()` is the deliberate way to arm one.
         guard !planSource.isPinned else { return }
-        var bySymbol: [TWSymbol: StockQuote] = [:]
+        var bySymbol: [MarketSymbol: StockQuote] = [:]
         for (key, quote) in latest {
-            if let symbol = TWSymbol(key) { bySymbol[symbol] = quote }
+            if let symbol = MarketSymbol(key) { bySymbol[symbol] = quote }
         }
         guard !bySymbol.isEmpty else { return }
 
         let alerts = await engine.evaluate(plan: plan, quotes: bySymbol)
         for alert in alerts {
             // Exits red, entries green — the colour is the first thing read.
+            // Deliberately *not* flipped per market: it marks what the
+            // instruction does to your position, not which way the price went.
             let tint: Color = alert.isApproach ? .orange
                 : (StocksFormat.tint(for: alert.levelKind))
             NotificationService.post(title: alert.title, body: alert.body, tint: tint,
@@ -315,32 +335,30 @@ final class StocksPlugin: GlancePlugin {
         }
     }
 
-    /// Daily bars, once per trading day after the close. Separate from the
-    /// realtime path in every way except the shared rate gate — which is the
-    /// whole point of the gate.
-    /// Daily bars, twice a day at most.
+    /// Daily bars, twice a day at most, and Taiwan only — the endpoints behind
+    /// `TWSEHistoryStore` are TWSE's and TPEX's own.
     ///
     /// The morning sweep is the one that matters and used to be missing: a plan
     /// that expresses volume relatively (`{"multiple": 1.5, "refAvgDays": 20}`
     /// rather than a hard 2602 張) can't be evaluated at all without the 20-day
     /// average, and an unmeasurable condition is treated as unmet — so waiting
-    /// until 14:00 to fetch history meant those entries could never fire during
-    /// the session they were written for. Yesterday's bars are all the average
-    /// needs and they're available at any hour.
+    /// until after the close to fetch history meant those entries could never
+    /// fire during the session they were written for. Yesterday's bars are all
+    /// the average needs and they're available at any hour.
     ///
     /// The post-close sweep then picks up today's own bar, which is what the
     /// multi-session rules (`破X後3日內收回`) walk.
     private func sweepHistoryIfDue() async {
         guard planSource.plan != nil else { return }
-        let today = TWMarketClock.tradingDay()
+        let today = Market.tw.tradingDay()
         let needsMorning = lastHistorySweepDay != today
-        let needsPostClose = TWMarketClock.isAfterClose() && lastHistoryCloseSweepDay != today
+        let needsPostClose = Market.tw.isAfterClose() && lastHistoryCloseSweepDay != today
         guard needsMorning || needsPostClose else { return }
 
         lastHistorySweepDay = today
-        if TWMarketClock.isAfterClose() { lastHistoryCloseSweepDay = today }
+        if Market.tw.isAfterClose() { lastHistoryCloseSweepDay = today }
 
-        let symbols = taiwanKeys().compactMap { TWSymbol($0) }
+        let symbols = (keysByMarket()[.tw] ?? []).compactMap { MarketSymbol($0) }
         await TWSEHistoryStore.shared.refresh(symbols: symbols, force: needsPostClose)
     }
 
@@ -348,7 +366,7 @@ final class StocksPlugin: GlancePlugin {
 
     /// With a plan loaded, the plan is the news: a level that fired today, or
     /// one the price is sitting right on top of, is what deserves the card. The
-    /// old biggest-mover behaviour stays as the fallback for a watchlist with no
+    /// biggest-mover behaviour stays as the fallback for a watchlist with no
     /// plan attached, and its high thresholds still apply — markets wiggle a
     /// percent or two constantly, and treating that as news lets the stock card
     /// claim the feed on almost every open.
@@ -391,7 +409,7 @@ final class StocksPlugin: GlancePlugin {
         guard let nearest, nearest.distance <= 1.0, let line = nearest.status.line else { return nil }
         return GlanceSignal(
             priority: .elevated, score: 10 - nearest.distance,
-            headline: String(format: "%@ 逼近%@ %@（%.2f%%）",
+            headline: String(format: "%@ nearing %@ %@ (%.2f%%)",
                              nearest.stock, StocksFormat.levelLabel(nearest.status.kind),
                              StocksFormat.price(line), nearest.distance),
             detail: nearest.status.condition,
@@ -405,23 +423,26 @@ final class StocksPlugin: GlancePlugin {
             return nil
         }
         let magnitude = abs(mover.changePercent)
-        let open = TWSymbol(mover.symbol) != nil ? TWMarketClock.isOpen() : usMarketProbablyOpen
+        let open = mover.market.isOpen()
         // Below this, a stock has nothing time-sensitive to say — stay out of the
         // feed rather than filling it with routine noise. The threshold is higher
         // after the close, where a stale flat quote is even less worth a card.
         let floor: Double = open ? 3 : 5
         if magnitude < floor { return nil }
 
-        let headline = String(format: "%@ %@%.2f%% · %.2f",
-                              mover.name ?? mover.symbol, mover.isUp ? "+" : "−", magnitude, mover.price)
-        let tint: Color = mover.isUp ? .green : .red
+        let headline = String(format: "%@ %@%.2f%% · %@",
+                              mover.name ?? mover.symbol, mover.isUp ? "+" : "−", magnitude,
+                              StocksFormat.price(mover.price, market: mover.market))
         // Only a genuinely outsized move (≥8%) earns the elevated rank that leads
         // the brief; a merely notable one sits at normal, below anything urgent.
         let priority: GlanceSignal.Priority = magnitude >= 8 ? .elevated : .normal
         return GlanceSignal(priority: priority, score: magnitude,
                             headline: headline,
                             detail: open ? nil : "At last close",
-                            systemImage: iconSystemName, tint: tint,
+                            systemImage: iconSystemName,
+                            // The market's own convention, not this app's: a red
+                            // 台積電 up-tick is what a Taipei screen shows.
+                            tint: mover.market.tint(rising: mover.isUp),
                             accessory: mover.series.count > 1 ? .sparkline(mover.series, up: mover.isUp) : .none)
     }
 
@@ -437,19 +458,6 @@ final class StocksPlugin: GlancePlugin {
 
     /// Live quotes keyed by watchlist spelling, for the plan board.
     var quotesByKey: [String: StockQuote] { latest }
-
-    /// Rough US-market-hours heuristic (weekday, 9:30–16:00 ET) used only to
-    /// pick a refresh cadence — not for correctness.
-    private var usMarketProbablyOpen: Bool {
-        var cal = Calendar(identifier: .gregorian)
-        guard let et = TimeZone(identifier: "America/New_York") else { return true }
-        cal.timeZone = et
-        let comps = cal.dateComponents([.weekday, .hour, .minute], from: Date())
-        guard let weekday = comps.weekday, let hour = comps.hour, let minute = comps.minute else { return true }
-        if weekday == 1 || weekday == 7 { return false } // Sun/Sat
-        let minutes = hour * 60 + minute
-        return minutes >= (9 * 60 + 30) && minutes <= (16 * 60)
-    }
 }
 
 // MARK: - Popover UI
@@ -466,6 +474,7 @@ private struct StocksPopover: View {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let planError = plugin.planSource.error {
                 Label(planError, systemImage: "doc.badge.exclamationmark")
@@ -481,16 +490,25 @@ private struct StocksPopover: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(plugin.quotes) { quote in
-                        StocksQuoteRow(quote: quote)
+                        StocksQuoteRow(quote: quote,
+                                       showsMarketBadge: plugin.activeMarkets.count > 1)
                     }
                 }
             }
 
             // Below the rows rather than above: it's a reassurance to glance
-            // down at, not something to read before the prices.
-            StocksFeedStatus(lastFetch: plugin.lastTaiwanFetch,
-                             quotedAt: plugin.taiwanQuotedAt,
-                             cadence: plugin.taiwanCadence)
+            // down at, not something to read before the prices. One line per
+            // market, because "live" is a claim each feed has to make for itself
+            // — Tokyo is shut while New York is mid-session, and a single
+            // heartbeat would have to lie about one of them.
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(plugin.activeMarkets, id: \.self) { market in
+                    StocksFeedStatus(market: market,
+                                     labelled: plugin.activeMarkets.count > 1,
+                                     lastFetch: plugin.lastFetch[market],
+                                     quotedAt: plugin.quotedAt(for: market))
+                }
+            }
 
             Divider()
 
@@ -521,14 +539,22 @@ private struct StocksSettings: View {
     @State private var approachText: String = ""
     @State private var savedNote: String?
 
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Watchlist")
                 .font(.headline)
-            Text("Comma-separated symbols. Taiwan: TWSE-2330 / TPEX-3491 / 2330.TW. Everything else goes to Yahoo or Finnhub.")
+            Text("""
+                 Comma-separated symbols, from any of three markets:
+                 • Taiwan — TWSE-2330, TPEX-3491, or 2330.TW
+                 • United States — AAPL, MSFT, BRK.B
+                 • Japan — TSE-7203, or 7203.T
+
+                 A bare four-digit code is read as Taiwan, so Japanese listings \
+                 need the TSE- prefix or the .T suffix.
+                 """)
                 .font(.caption).foregroundStyle(.secondary)
-            TextField("TWSE-2330, AAPL, MSFT", text: $symbolsText, axis: .vertical)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("TWSE-2330, AAPL, TSE-7203", text: $symbolsText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...4)
             Button("Save watchlist") {
@@ -539,17 +565,30 @@ private struct StocksSettings: View {
                 Task { await plugin.refresh() }
             }
 
+            Text("""
+                 Rises are drawn in each market's own colour — red for Taiwan and \
+                 Japan, green for the United States. The ▲ / ▼ arrow means the \
+                 same thing everywhere.
+                 """)
+                .font(.caption).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Divider()
 
-            Text("交易計畫")
+            Text("Trading plan")
                 .font(.headline)
-            Text("選一個 JSON 檔，存檔後自動重新載入。價格觸及計畫中的關卡時發送通知。格式見 PLAN_SCHEMA.md。")
+            Text("""
+                 Pick a JSON file; it reloads automatically whenever you save it. \
+                 You get a notification when the price reaches one of the plan's \
+                 levels. See PLAN_SCHEMA.md for the format.
+                 """)
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("選擇計畫檔…") { plugin.planSource.chooseFile() }
+                Button("Choose plan file…") { plugin.planSource.chooseFile() }
                 if plugin.planSource.displayPath != nil {
-                    Button("移除") { plugin.planSource.clear() }
-                    Button("重新載入") {
+                    Button("Remove") { plugin.planSource.clear() }
+                    Button("Reload") {
                         plugin.planSource.reload()
                         Task { await plugin.refresh() }
                     }
@@ -559,21 +598,27 @@ private struct StocksSettings: View {
                 Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
             }
             if let plan = plugin.planSource.plan {
-                Text("已載入 \(plan.date ?? "?")，\(plan.plans.count) 檔")
+                Text("Loaded \(plan.date ?? "?") · \(plan.plans.count) stocks")
                     .font(.caption).foregroundStyle(.green)
             }
             if let error = plugin.planSource.error {
                 Text(error).font(.caption).foregroundStyle(.orange)
             }
-            Text("接近提醒")
+
+            Text("Approach warnings")
                 .font(.headline)
-            Text("價格接近關卡到這些百分比時，先發一則提醒。以逗號分隔，留空即關閉。每個關卡每個級距每天只提醒一次。")
+            Text("""
+                 Send an early heads-up when the price closes to within these \
+                 percentages of a level. Comma-separated; leave blank to switch \
+                 them off. Each level fires each band at most once a day.
+                 """)
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 TextField("10, 5, 2", text: $approachText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 140)
-                Button("儲存") {
+                Button("Save") {
                     plugin.engine.setApproachBands(
                         approachText.split(whereSeparator: { ",，、 ".contains($0) })
                             .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) })
@@ -594,8 +639,15 @@ private struct StocksSettings: View {
 
             Text("Finnhub API key (optional)")
                 .font(.headline)
-            Text("Provide a key for more reliable US quotes. Stored in Glancekit's credentials file, not in app preferences. Leave blank to use the keyless Yahoo source. Taiwan quotes need no key.")
+            Text("""
+                 Provide a key for more reliable US quotes. Stored in Glancekit's \
+                 credentials file, not in app preferences. Leave blank to use the \
+                 keyless Yahoo source. Taiwan and Japan need no key — Finnhub's \
+                 free tier doesn't cover them, so they stay on their own feeds \
+                 either way.
+                 """)
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             SecureField("Finnhub API key", text: $finnhubKey)
                 .textFieldStyle(.roundedBorder)
             HStack {

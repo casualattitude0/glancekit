@@ -3,11 +3,15 @@ import Foundation
 /// A single stock quote plus an optional intraday series for the sparkline.
 ///
 /// The fields below `series` are all optional additions carrying detail only
-/// some sources provide — the Taiwan MIS feed fills them in, Yahoo and Finnhub
-/// leave them nil. They default, so every existing construction site still
-/// compiles unchanged.
+/// some sources provide — Taiwan's MIS feed fills in every one of them, Yahoo
+/// fills in most, Finnhub only a few. They default, so a provider states what it
+/// actually knows and nothing else.
 struct StockQuote: Identifiable, Equatable {
+    /// The watchlist spelling this quote answers to — whatever the user typed.
     let symbol: String
+    /// Which market it trades in, which decides its currency, its volume unit
+    /// and, not least, which direction is drawn in red.
+    var market: Market
     var price: Double
     /// `price` when it came from an actual match, nil when it was inferred
     /// (an order-book stand-in, or yesterday's close). Taiwan's MIS feed blanks
@@ -21,18 +25,24 @@ struct StockQuote: Identifiable, Equatable {
     /// Intraday closes, oldest → newest, used to draw the sparkline.
     var series: [Double]
 
-    /// Display name from the exchange, e.g. 台積電. Nil when the source has none.
+    /// Display name from the exchange, e.g. 台積電 / Apple Inc. Nil when the
+    /// source has none.
     var name: String? = nil
-    /// Accumulated volume for the session, in 張 (lots). The plan's volume
-    /// conditions are all quoted in 張, so it's stored in that unit, not shares.
-    var volumeLots: Double? = nil
+    /// Accumulated volume for the session, in whatever `volumeUnit` says. The
+    /// unit is carried rather than normalized because the two readings are not
+    /// interchangeable: a Taiwan strategy plan's volume conditions are written
+    /// in 張, and silently converting to shares would compare 2,602 against
+    /// 2,602,000.
+    var volume: Double? = nil
+    var volumeUnit: Market.VolumeUnit = .shares
     var open: Double? = nil
     var dayHigh: Double? = nil
     var dayLow: Double? = nil
-    /// The session's price limits (漲停/跌停), ±10% of the previous close on
-    /// TWSE. Carried rather than recomputed because the exchange applies its
-    /// own rounding to the tick grid, and a locked stock is precisely the case
-    /// where being one tick off would misreport it as still trading.
+    /// The session's price limits (漲停/跌停 in Taiwan, ストップ高/安 in Japan),
+    /// where the exchange publishes them. Carried rather than recomputed because
+    /// exchanges apply their own rounding to the tick grid, and a locked stock is
+    /// precisely the case where being one tick off would misreport it as still
+    /// trading. US equities have no daily limit, so this stays nil there.
     var limitUp: Double? = nil
     var limitDown: Double? = nil
     /// Best bid and ask. Kept because they are the only part of a Taiwan quote
@@ -50,19 +60,28 @@ struct StockQuote: Identifiable, Equatable {
         previousClose == 0 ? 0 : (change / previousClose) * 100
     }
     var isUp: Bool { change >= 0 }
+
+    /// Volume in 張, and only where that is genuinely the unit reported. The
+    /// strategy engine reads this, so a US quote's share count can never be
+    /// mistaken for a lot count by a rule written for Taiwan.
+    var volumeLots: Double? { volumeUnit == .lots ? volume : nil }
 }
 
-/// The pluggable seam for stock data. Yahoo is the keyless default; Finnhub is
-/// the reliability upgrade once the user supplies a key. New providers (IEX,
-/// Polygon, …) drop in behind this protocol.
+/// The pluggable seam for stock data. Taiwan symbols go to the exchange's own
+/// MIS feed; US and Japanese symbols go to Yahoo, or to Finnhub once the user
+/// supplies a key. New providers (IEX, Polygon, …) drop in behind this protocol.
 protocol QuoteProvider {
     func fetchQuotes(_ symbols: [String]) async throws -> [StockQuote]
 }
 
-// MARK: - Yahoo (keyless default)
+// MARK: - Yahoo (keyless default, US + Japan)
 
 /// Uses Yahoo's public v8 chart endpoint (no API key). Unofficial and can
-/// change without notice — hence the Finnhub fallback.
+/// change without notice — hence the Finnhub fallback for US names.
+///
+/// This is the multi-market path: Yahoo spells a Tokyo listing `7203.T` and a
+/// Taipei one `2330.TW`, so `MarketSymbol.yahooSymbol` is the only place that
+/// has to know the difference.
 struct YahooQuoteProvider: QuoteProvider {
     var client = NetworkClient()
 
@@ -79,7 +98,10 @@ struct YahooQuoteProvider: QuoteProvider {
     }
 
     private func fetchOne(_ symbol: String) async throws -> StockQuote {
-        let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
+        let parsed = MarketSymbol(symbol)
+        let wire = parsed?.yahooSymbol ?? symbol
+        let market = parsed?.market ?? .us
+        let encoded = wire.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? wire
         let url = "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?range=1d&interval=5m"
         let response = try await client.get(YahooChartResponse.self, from: url)
         guard let result = response.chart.result?.first else {
@@ -89,10 +111,20 @@ struct YahooQuoteProvider: QuoteProvider {
         let closes = result.indicators?.quote?.first?.close?.compactMap { $0 } ?? []
         return StockQuote(
             symbol: symbol,
+            market: market,
             price: meta.regularMarketPrice ?? closes.last ?? 0,
             previousClose: meta.chartPreviousClose ?? meta.previousClose ?? 0,
-            currency: meta.currency ?? "USD",
-            series: closes
+            currency: meta.currency ?? market.currencyCode,
+            series: closes,
+            name: meta.shortName ?? meta.longName,
+            // Yahoo reports every market's volume in shares, including Taiwan's
+            // — so it is tagged as shares whatever the symbol, and a Taiwan
+            // plan's 張 conditions correctly find nothing to measure here.
+            volume: meta.regularMarketVolume,
+            volumeUnit: .shares,
+            dayHigh: meta.regularMarketDayHigh,
+            dayLow: meta.regularMarketDayLow,
+            quotedAt: meta.regularMarketTime.map { Date(timeIntervalSince1970: $0) }
         )
     }
 }
@@ -106,20 +138,31 @@ private struct YahooChartResponse: Decodable {
     }
     struct Meta: Decodable {
         let currency: String?
+        let shortName: String?
+        let longName: String?
         let regularMarketPrice: Double?
         let chartPreviousClose: Double?
         let previousClose: Double?
+        let regularMarketDayHigh: Double?
+        let regularMarketDayLow: Double?
+        let regularMarketVolume: Double?
+        let regularMarketTime: Double?
     }
     struct Indicators: Decodable { let quote: [Quote]? }
     struct Quote: Decodable { let close: [Double?]? }
     let chart: Chart
 }
 
-// MARK: - Finnhub (key required, more reliable)
+// MARK: - Finnhub (key required, US only)
 
-/// Uses Finnhub's `/quote` endpoint. Requires an API key stored in `CredentialStore`
-/// under `finnhub.apiKey`. No intraday series (keeps the free tier light), so
-/// sparklines are empty for Finnhub-sourced quotes.
+/// Uses Finnhub's `/quote` endpoint. Requires an API key stored in
+/// `CredentialStore` under `finnhub.apiKey`. No intraday series (keeps the free
+/// tier light), so sparklines are empty for Finnhub-sourced quotes.
+///
+/// Used only for US symbols. Finnhub's free tier does not cover Taiwanese or
+/// Japanese equities, and a provider that returns an empty quote for them would
+/// look like a dead feed rather than an unsupported market — so those symbols
+/// stay on Yahoo even when a key is present.
 struct FinnhubQuoteProvider: QuoteProvider {
     var apiKey: String
     var client = NetworkClient()
@@ -127,15 +170,21 @@ struct FinnhubQuoteProvider: QuoteProvider {
     func fetchQuotes(_ symbols: [String]) async throws -> [StockQuote] {
         var results: [StockQuote] = []
         for symbol in symbols {
-            let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? symbol
+            let wire = MarketSymbol(symbol)?.code ?? symbol
+            let encoded = wire.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? wire
             let url = "https://finnhub.io/api/v1/quote?symbol=\(encoded)&token=\(apiKey)"
             if let q = try? await client.get(FinnhubQuote.self, from: url) {
                 results.append(StockQuote(
                     symbol: symbol,
+                    market: .us,
                     price: q.c,
                     previousClose: q.pc,
                     currency: "USD",
-                    series: []
+                    series: [],
+                    open: q.o,
+                    dayHigh: q.h,
+                    dayLow: q.l,
+                    quotedAt: q.t.map { Date(timeIntervalSince1970: $0) }
                 ))
             }
         }
@@ -145,5 +194,9 @@ struct FinnhubQuoteProvider: QuoteProvider {
     private struct FinnhubQuote: Decodable {
         let c: Double   // current
         let pc: Double  // previous close
+        let o: Double?  // open
+        let h: Double?  // day high
+        let l: Double?  // day low
+        let t: Double?  // quote time, epoch seconds
     }
 }

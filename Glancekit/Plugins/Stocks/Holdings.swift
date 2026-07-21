@@ -3,19 +3,33 @@ import Foundation
 /// The portfolio, as exported each day from the trading journal.
 struct Holdings: Codable, Equatable {
     var updatedAt: String?
-    /// Cash available to buy with, in TWD. Nil when not tracked.
+    /// Cash available to buy with. Nil when not tracked.
     var cash: Double?
+    /// Which currency `cash` is denominated in, as an ISO code. A portfolio
+    /// spanning markets holds positions in several currencies but only ever one
+    /// pile of cash, so this is stated rather than inferred — guessing it from
+    /// the positions would silently re-denominate the buying power the moment a
+    /// foreign holding was added.
+    var currency: String?
     var positions: [HoldingPosition]
 
-    func position(for symbol: TWSymbol) -> HoldingPosition? {
-        positions.first { TWSymbol($0.stockId) == symbol }
+    /// The market whose currency `cash` is in, for formatting and for the
+    /// affordability maths. Defaults to Taiwan, which is what every existing
+    /// export means by a bare `cash` field.
+    var cashMarket: Market {
+        guard let currency = currency?.uppercased() else { return .tw }
+        return Market.allCases.first { $0.currencyCode == currency } ?? .tw
+    }
+
+    func position(for symbol: MarketSymbol) -> HoldingPosition? {
+        positions.first { MarketSymbol($0.stockId) == symbol }
     }
 }
 
 struct HoldingPosition: Codable, Equatable, Identifiable {
     var stockId: String
     var name: String?
-    /// Shares (股), not 張 — these are odd-lot holdings.
+    /// Shares, not lots — these are odd-lot holdings.
     var shares: Double
     var avgCost: Double
 
@@ -43,7 +57,11 @@ struct HoldingPosition: Codable, Equatable, Identifiable {
     }
 
     var id: String { stockId }
-    var symbol: TWSymbol? { TWSymbol(stockId) }
+    var symbol: MarketSymbol? { MarketSymbol(stockId) }
+    /// The market this position trades in — which decides its currency and
+    /// which direction its P/L is drawn in. Unparseable ids fall back to
+    /// Taiwan, matching how they are already treated everywhere else.
+    var market: Market { symbol?.market ?? .tw }
     var displayName: String { name ?? stockId }
     var costBasis: Double { shares * avgCost }
 
@@ -148,18 +166,18 @@ enum ShareMath {
 
         switch action {
         case .sellAll:
-            guard held > 0 else { return ShareInstruction(shares: nil, isSell: true, note: "未持有") }
+            guard held > 0 else { return ShareInstruction(shares: nil, isSell: true, note: "Not held") }
             return ShareInstruction(shares: Int(held), isSell: true)
 
         case .sellFractionOfHoldings(let f):
-            guard held > 0 else { return ShareInstruction(shares: nil, isSell: true, note: "未持有") }
+            guard held > 0 else { return ShareInstruction(shares: nil, isSell: true, note: "Not held") }
             // Round down: selling fewer shares than planned leaves you with a
             // position, selling more than you own is not a thing.
             return ShareInstruction(shares: Int((held * f).rounded(.down)), isSell: true)
 
         case .addFraction(let add):
             guard let after = TradeAction.fraction(in: size.after ?? "") else {
-                return ShareInstruction(shares: nil, isSell: false, note: "無法推算（缺 size.after）")
+                return ShareInstruction(shares: nil, isSell: false, note: "Cannot derive — size.after missing")
             }
             // `after − action` is the rung you must be standing on for this step
             // to make sense. Zero means this is the opening tranche, which has
@@ -168,11 +186,12 @@ enum ShareMath {
             guard currentRung > 0 else {
                 return ShareInstruction(
                     shares: nil, isSell: false,
-                    note: held > 0 ? "已持有，此步視為已完成" : "建倉第一筆，無基準可推算")
+                    note: held > 0 ? "Already held — this step is done"
+                            : "Opening tranche — no prior position to scale from")
             }
             guard held > 0 else {
                 return ShareInstruction(shares: nil, isSell: false,
-                                        note: "未持有，無法從持股推算滿倉")
+                                        note: "Not held — cannot infer a full position")
             }
             let unit = held / currentRung            // shares per 1.0 of position
             let buy = Int((unit * add).rounded(.down))
@@ -183,7 +202,7 @@ enum ShareMath {
             return out
 
         case .buyBackToPrior:
-            return ShareInstruction(shares: nil, isSell: false, note: "回補至原水位")
+            return ShareInstruction(shares: nil, isSell: false, note: "Buy back to the prior level")
 
         case .unrecognized:
             return nil
@@ -230,13 +249,13 @@ enum ShareMath {
         return out
     }
 
-    /// "18 股" / "36 股（現金僅夠 20 股）".
+    /// "18 sh" / "36 sh (cash covers 20)".
     static func describe(_ instruction: ShareInstruction?) -> String? {
         guard let instruction else { return nil }
         guard let shares = instruction.shares else { return instruction.note }
-        var text = "\(shares) 股"
+        var text = "\(shares) sh"
         if instruction.isShort, let affordable = instruction.affordableShares {
-            text += "（現金僅夠 \(affordable) 股）"
+            text += " (cash covers \(affordable))"
         }
         return text
     }

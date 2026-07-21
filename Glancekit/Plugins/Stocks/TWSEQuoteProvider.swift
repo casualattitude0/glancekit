@@ -21,7 +21,10 @@ struct TWSEQuoteProvider: QuoteProvider {
     /// `fetchQuotes` takes the watchlist spellings; non-Taiwan entries are
     /// dropped here and picked up by the Yahoo/Finnhub path instead.
     func fetchQuotes(_ symbols: [String]) async throws -> [StockQuote] {
-        let parsed = symbols.compactMap { raw in TWSymbol(raw).map { (raw, $0) } }
+        let parsed = symbols.compactMap { raw -> (String, MarketSymbol)? in
+            guard let symbol = MarketSymbol(raw), symbol.market == .tw else { return nil }
+            return (raw, symbol)
+        }
         guard !parsed.isEmpty else { return [] }
 
         var out: [StockQuote] = []
@@ -33,8 +36,8 @@ struct TWSEQuoteProvider: QuoteProvider {
         return out
     }
 
-    private func fetchChunk(_ chunk: [(String, TWSymbol)]) async throws -> [StockQuote] {
-        let exCh = chunk.map { $0.1.misKey }.joined(separator: "|")
+    private func fetchChunk(_ chunk: [(String, MarketSymbol)]) async throws -> [StockQuote] {
+        let exCh = chunk.compactMap { $0.1.misKey }.joined(separator: "|")
         // The `_` cache-buster is what tsrtc sends; MIS serves a cached body
         // without it. `delay=0` asks for the undelayed feed.
         let stamp = Int(Date().timeIntervalSince1970 * 1000)
@@ -62,7 +65,7 @@ struct TWSEQuoteProvider: QuoteProvider {
         }
 
         return chunk.compactMap { raw, symbol in
-            byKey[symbol.misKey].flatMap { quote(from: $0, displayedAs: raw) }
+            symbol.misKey.flatMap { byKey[$0] }.flatMap { quote(from: $0, displayedAs: raw) }
         }
     }
 
@@ -101,13 +104,17 @@ struct TWSEQuoteProvider: QuoteProvider {
 
         return StockQuote(
             symbol: symbol,
+            market: .tw,
             price: price,
             tradePrice: tradePrice,
             previousClose: previousClose,
-            currency: "TWD",
+            currency: Market.tw.currencyCode,
             series: [],
             name: e.n,
-            volumeLots: num(e.v),
+            // MIS reports 張, which is also the unit every strategy-plan volume
+            // condition is written in — so it is tagged, not converted.
+            volume: num(e.v),
+            volumeUnit: .lots,
             open: num(e.o),
             dayHigh: num(e.h),
             dayLow: num(e.l),

@@ -167,12 +167,12 @@ struct StrategyPlan: Codable, Equatable {
         var target: Target?
         var positionPath: PositionPath?
 
-        var symbol: TWSymbol? { TWSymbol(stockId) }
+        var symbol: MarketSymbol? { MarketSymbol(stockId) }
         var displayName: String { name ?? stockId }
     }
 
     /// The symbols a plan wants quoted, in file order.
-    var symbols: [TWSymbol] { plans.compactMap(\.symbol) }
+    var symbols: [MarketSymbol] { plans.compactMap(\.symbol) }
 
     /// Canonical display order for levels, from most bullish to most bearish;
     /// anything unrecognized sorts last.
@@ -484,10 +484,13 @@ enum TriggerResolver {
             reference: reference,
             price: price,
             band: band,
-            // 收盤 in the prose means "on the close, not on a wick" — honouring
-            // it is what stops an intraday spike through a stop from firing an
-            // alert the plan never intended.
-            onClose: t?.onClose ?? prose.contains("收盤"),
+            // 收盤 / "on close" in the prose means "on the close, not on a
+            // wick" — honouring it is what stops an intraday spike through a
+            // stop from firing an alert the plan never intended. Both spellings
+            // are read, so a plan written in either language behaves the same.
+            onClose: t?.onClose ?? prose.contains("收盤")
+                || prose.lowercased().contains("on close")
+                || prose.lowercased().contains("at the close"),
             volume: t?.volumeLots ?? inferredVolume(from: prose),
             confirmWithinDays: t?.confirmWithinDays ?? 3,
             approachBands: t?.approachBands,

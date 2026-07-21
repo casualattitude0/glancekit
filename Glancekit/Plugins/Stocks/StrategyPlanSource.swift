@@ -14,7 +14,7 @@ import Observation
 /// atomically, which creates a *new* inode and leaves a file-level descriptor
 /// watching a ghost. Watching the directory survives that; the cost is waking
 /// on unrelated writes to sibling files, which the debounce absorbs.
-/// A plan kept from a previous day, listed in the glance's 計畫記錄 menu.
+/// A plan kept from a previous day, listed in the glance's History menu.
 struct ArchivedPlan: Identifiable, Equatable {
     let date: String
     let url: URL
@@ -55,7 +55,7 @@ final class StrategyPlanSource {
     /// moving averages that have since moved, so the UI says so out loud.
     var isStale: Bool {
         guard let date = plan?.date else { return false }
-        return date != TWMarketClock.tradingDay()
+        return date != Market.tw.tradingDay()
     }
 
     /// Called on the main actor after a successful reload.
@@ -91,8 +91,8 @@ final class StrategyPlanSource {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.json]
-        panel.prompt = "選擇"
-        panel.message = "選擇每日交易計畫 JSON"
+        panel.prompt = "Choose"
+        panel.message = "Choose your daily trading-plan JSON"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         pinnedArchiveDate = nil
         saveBookmark(for: url)
@@ -106,7 +106,7 @@ final class StrategyPlanSource {
     func loadArchive(_ archive: ArchivedPlan) {
         guard let data = try? Data(contentsOf: archive.url),
               let decoded = try? JSONDecoder().decode(StrategyPlan.self, from: data) else {
-            error = "無法讀取 \(archive.date) 的計畫"
+            error = "Couldn't read the \(archive.date) plan"
             return
         }
         pinnedArchiveDate = archive.date
@@ -152,7 +152,7 @@ final class StrategyPlanSource {
     /// Keep a copy of a plan under its own date. Same-date reloads overwrite,
     /// so editing this morning's plan doesn't accumulate near-duplicates.
     private func archive(_ plan: StrategyPlan, data: Data) {
-        let date = plan.date ?? TWMarketClock.tradingDay()
+        let date = plan.date ?? Market.tw.tradingDay()
         // Never let a stray `date` value escape into a path.
         let safe = date.replacingOccurrences(of: "/", with: "-")
             .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
@@ -238,9 +238,9 @@ final class StrategyPlanSource {
             loadedAt = Date()
             error = validationWarning(for: decoded)
         } catch let decodingError as DecodingError {
-            error = "計畫解析失敗：\(readable(decodingError))"
+            error = "Plan failed to parse: \(readable(decodingError))"
         } catch let readError {
-            error = "計畫讀取失敗：\(readError.localizedDescription)"
+            error = "Plan failed to load: \(readError.localizedDescription)"
         }
         onChange?()
     }
@@ -250,15 +250,16 @@ final class StrategyPlanSource {
     private func validationWarning(for plan: StrategyPlan) -> String? {
         let unparsed = plan.plans.filter { $0.symbol == nil }.map(\.stockId)
         guard !unparsed.isEmpty else { return nil }
-        return "無法辨識代號：\(unparsed.joined(separator: "、"))（上櫃請寫成 TPEX-3491）"
+        return "Unrecognized symbols: \(unparsed.joined(separator: ", "))"
+            + " — use TPEX-3491 for Taipei OTC, TSE-7203 for Tokyo"
     }
 
     private func readable(_ error: DecodingError) -> String {
         switch error {
         case .keyNotFound(let key, let ctx):
-            return "缺少 \(key.stringValue)（\(path(ctx))）"
+            return "missing \(key.stringValue) at \(path(ctx))"
         case .typeMismatch(_, let ctx), .valueNotFound(_, let ctx):
-            return "\(ctx.debugDescription)（\(path(ctx))）"
+            return "\(ctx.debugDescription) at \(path(ctx))"
         case .dataCorrupted(let ctx):
             return ctx.debugDescription
         @unknown default:

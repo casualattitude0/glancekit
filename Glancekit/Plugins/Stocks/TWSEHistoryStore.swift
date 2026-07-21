@@ -14,8 +14,15 @@ struct TWDailyBar: Codable, Equatable {
     let volumeLots: Double
 }
 
-/// Daily bars for Taiwan symbols, from the same after-hours endpoints
+/// Daily bars for **Taiwan** symbols, from the same after-hours endpoints
 /// `mlouielu/twstock` uses.
+///
+/// Taiwan-only on purpose. The two endpoints below are TWSE's and TPEX's own,
+/// and the plan features that need daily bars — moving averages, relative
+/// volume, the multi-session reclaim rules — are all written against a Taiwan
+/// trading plan. A US or Japanese symbol asked for a moving average here gets
+/// nil, which the engine already treats as "cannot be measured" and the level
+/// row surfaces as `Awaiting daily bars` rather than pretending to be armed.
 ///
 /// This exists because the realtime feed only knows about *today*, and a
 /// strategy plan is full of statements that aren't about today:
@@ -40,18 +47,18 @@ actor TWSEHistoryStore {
     private var gate: TWRateGate = .shared
 
     /// In-memory bars per symbol, oldest → newest.
-    private var bars: [TWSymbol: [TWDailyBar]] = [:]
+    private var bars: [MarketSymbol: [TWDailyBar]] = [:]
     /// Trading day of the last successful refresh, so we sweep at most once a day.
-    private var lastSweepDay: [TWSymbol: String] = [:]
+    private var lastSweepDay: [MarketSymbol: String] = [:]
 
     // MARK: Reads
 
-    func bars(for symbol: TWSymbol) -> [TWDailyBar] { bars[symbol] ?? [] }
+    func bars(for symbol: MarketSymbol) -> [TWDailyBar] { bars[symbol] ?? [] }
 
     /// Simple moving average of the last `n` closes, or nil if we don't have
     /// `n` sessions yet. Nil is meaningful: the caller falls back to the number
     /// written in the plan rather than inventing an average from a short window.
-    func movingAverage(_ n: Int, for symbol: TWSymbol) -> Double? {
+    func movingAverage(_ n: Int, for symbol: MarketSymbol) -> Double? {
         let closes = (bars[symbol] ?? []).suffix(n).map(\.close)
         guard closes.count == n, n > 0 else { return nil }
         return closes.reduce(0, +) / Double(n)
@@ -59,14 +66,14 @@ actor TWSEHistoryStore {
 
     /// Average daily volume in 張 over the last `n` sessions — the baseline a
     /// 量≥均量×1.5 condition is measured against.
-    func averageVolumeLots(_ n: Int, for symbol: TWSymbol) -> Double? {
+    func averageVolumeLots(_ n: Int, for symbol: MarketSymbol) -> Double? {
         let vols = (bars[symbol] ?? []).suffix(n).map(\.volumeLots)
         guard vols.count == n, n > 0 else { return nil }
         return vols.reduce(0, +) / Double(n)
     }
 
     /// The most recent `n` bars, newest last — what the 3-day rules walk.
-    func recentBars(_ n: Int, for symbol: TWSymbol) -> [TWDailyBar] {
+    func recentBars(_ n: Int, for symbol: MarketSymbol) -> [TWDailyBar] {
         Array((bars[symbol] ?? []).suffix(n))
     }
 
@@ -78,18 +85,18 @@ actor TWSEHistoryStore {
     /// `force` re-fetches the current month even if this symbol was already
     /// swept today — the post-close pass, which exists to pick up today's bar
     /// after the morning pass has already claimed the day.
-    func refresh(symbols: [TWSymbol], now: Date = Date(), force: Bool = false) async {
-        let today = TWMarketClock.tradingDay(now)
-        for symbol in symbols where !symbol.isIndex {
+    func refresh(symbols: [MarketSymbol], now: Date = Date(), force: Bool = false) async {
+        let today = Market.tw.tradingDay(now)
+        for symbol in symbols where symbol.market == .tw && !symbol.isIndex {
             if bars[symbol] == nil { bars[symbol] = loadFromDisk(symbol) }
             guard force || lastSweepDay[symbol] != today else { continue }
             await sweep(symbol, now: now, today: today)
         }
     }
 
-    private func sweep(_ symbol: TWSymbol, now: Date, today: String) async {
+    private func sweep(_ symbol: MarketSymbol, now: Date, today: String) async {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TWMarketClock.timeZone
+        calendar.timeZone = Market.tw.timeZone
 
         var collected: [String: TWDailyBar] = [:]
         for bar in bars[symbol] ?? [] { collected[bar.date] = bar }
@@ -121,9 +128,10 @@ actor TWSEHistoryStore {
         bars[symbol] = collected.values.sorted { $0.date < $1.date }
     }
 
-    private func fetchMonth(_ symbol: TWSymbol, year: Int, month: Int) async -> [TWDailyBar]? {
+    private func fetchMonth(_ symbol: MarketSymbol, year: Int, month: Int) async -> [TWDailyBar]? {
+        guard let exchange = symbol.exchange else { return nil }
         await gate.acquire(.history)
-        switch symbol.exchange {
+        switch exchange {
         case .twse:
             let url = String(format:
                 "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=%04d%02d01&stockNo=%@&response=json",
@@ -188,24 +196,24 @@ actor TWSEHistoryStore {
         return dir
     }
 
-    private func monthFile(_ symbol: TWSymbol, year: Int, month: Int) -> URL {
+    private func monthFile(_ symbol: MarketSymbol, year: Int, month: Int) -> URL {
         cacheDirectory.appendingPathComponent(
             String(format: "%@-%04d%02d.json", symbol.canonical, year, month))
     }
 
-    private func loadMonth(_ symbol: TWSymbol, year: Int, month: Int) -> [TWDailyBar]? {
+    private func loadMonth(_ symbol: MarketSymbol, year: Int, month: Int) -> [TWDailyBar]? {
         guard let data = try? Data(contentsOf: monthFile(symbol, year: year, month: month)) else { return nil }
         return try? JSONDecoder().decode([TWDailyBar].self, from: data)
     }
 
-    private func saveMonth(_ bars: [TWDailyBar], symbol: TWSymbol, year: Int, month: Int) {
+    private func saveMonth(_ bars: [TWDailyBar], symbol: MarketSymbol, year: Int, month: Int) {
         guard let data = try? JSONEncoder().encode(bars) else { return }
         try? data.write(to: monthFile(symbol, year: year, month: month), options: [.atomic])
     }
 
     /// Every cached month for a symbol, merged — the warm start on launch, so
     /// moving averages are available before the first network sweep.
-    private func loadFromDisk(_ symbol: TWSymbol) -> [TWDailyBar] {
+    private func loadFromDisk(_ symbol: MarketSymbol) -> [TWDailyBar] {
         let prefix = symbol.canonical + "-"
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: cacheDirectory, includingPropertiesForKeys: nil) else { return [] }

@@ -23,65 +23,117 @@ import SwiftUI
 /// Level naming and number formatting, in one place so the popover, the tool
 /// window, the notification body and the Smart Panel headline all say the same
 /// words for the same thing.
+///
+/// Everything here that varies by market takes a `Market` rather than guessing
+/// from the number: a price, a volume and a colour all mean different things in
+/// Taipei, New York and Tokyo, and a formatter that can't tell them apart is
+/// where a Japanese share count starts being printed as Taiwanese lots.
 enum StocksFormat {
+
+    /// The plan's own vocabulary, in English. The plan file writes these as
+    /// stable machine keys (`entry`, `cut`, …), so translating them here does
+    /// not touch any file the user authored.
     static func levelLabel(_ kind: String) -> String {
         switch kind {
-        case "entry": return "進場"
-        case "add": return "加碼"
-        case "trim": return "減碼"
-        case "reduce": return "減倉"
-        case "cut": return "停損"
-        case "reentry": return "重進"
+        case "entry": return "Entry"
+        case "add": return "Add"
+        case "trim": return "Trim"
+        case "reduce": return "Reduce"
+        case "cut": return "Stop"
+        case "reentry": return "Re-entry"
+        case "gate": return "Index gate"
         default: return kind
         }
     }
 
-    /// Taiwan prices are quoted to 2dp but are usually whole ticks; trailing
-    /// ".00" on every level makes a ladder much harder to scan.
-    static func price(_ value: Double) -> String {
-        value == value.rounded() ? String(format: "%.0f", value) : String(format: "%.2f", value)
+    /// Taiwanese and Japanese prices sit on coarse tick grids and are usually
+    /// whole numbers; trailing ".00" on every level makes a ladder much harder
+    /// to scan. US names are quoted in cents, where a bare "227.5" reads as a
+    /// truncation rather than a price — so the trimming is per market.
+    ///
+    /// The market-less form keeps the Taiwan behaviour, which is what every
+    /// plan-level call site wants.
+    static func price(_ value: Double, market: Market = .tw) -> String {
+        if market.trimsWholePrices, value == value.rounded() {
+            return String(format: "%.0f", value)
+        }
+        return String(format: "%.\(market.priceDecimals)f", value)
     }
 
     static func signedPercent(_ value: Double) -> String {
         String(format: "%@%.2f%%", value >= 0 ? "+" : "−", abs(value))
     }
 
-    /// 漲跌 the way a broker terminal writes it: an arrow, the move in points,
-    /// then the percent. The arrow carries the sign, so the percent drops its
-    /// own — "▲50 +2.18%" says up twice and reads as clutter at caption size.
+    /// The change the way a broker terminal writes it: an arrow, the move in
+    /// points, then the percent. The arrow carries the sign, so the percent
+    /// drops its own — "▲50 +2.18%" says up twice and reads as clutter at
+    /// caption size.
     ///
     /// Direction is the arrow's job specifically because colour can't be
-    /// trusted to do it alone: red-up/green-up is a per-market convention, and
-    /// on a menu-bar panel this is also the only cue that survives for someone
-    /// who can't separate the two hues.
-    static func changeLine(points: Double, percent: Double) -> String {
-        guard points != 0 else { return String(format: "0.00%%") }
+    /// trusted to do it alone: this glance now draws a Taipei rise in red and a
+    /// New York rise in green, exactly as each market does, and on a menu-bar
+    /// panel the arrow is also the only cue that survives for someone who can't
+    /// separate the two hues.
+    static func changeLine(points: Double, percent: Double, market: Market) -> String {
+        guard points != 0 else { return "0.00%" }
         return String(format: "%@%@ %.2f%%",
-                      points > 0 ? "▲" : "▼", price(abs(points)), abs(percent))
+                      Market.arrow(rising: points > 0),
+                      price(abs(points), market: market), abs(percent))
     }
 
-    private static let lots: NumberFormatter = {
+    private static let grouped: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         f.maximumFractionDigits = 0
         return f
     }()
 
-    /// Accumulated volume in 張 — the unit the exchange reports and the unit
-    /// the strategy plan's volume conditions are written in, so no conversion
-    /// happens anywhere between the feed and the rule.
-    static func volume(_ lots: Double) -> String {
-        (Self.lots.string(from: NSNumber(value: lots)) ?? "\(Int(lots))") + " 張"
+    private static func group(_ value: Double) -> String {
+        grouped.string(from: NSNumber(value: value)) ?? String(Int(value))
     }
 
-    static func time(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        f.timeZone = TWMarketClock.timeZone
-        return f.string(from: date)
+    /// Accumulated volume, in whatever unit the exchange reported it.
+    ///
+    /// Taiwan publishes 張 (lots), which is also the unit every strategy-plan
+    /// volume condition is written in, so no conversion happens anywhere
+    /// between the feed and the rule. Yahoo publishes shares for the US and
+    /// Japan, where the numbers run to eight digits and only an abbreviated
+    /// form fits a 240pt column.
+    static func volume(_ value: Double, unit: Market.VolumeUnit) -> String {
+        switch unit {
+        case .lots:
+            return group(value) + " lots"
+        case .shares:
+            if value >= 1_000_000 { return String(format: "%.1fM sh", value / 1_000_000) }
+            if value >= 1_000 { return String(format: "%.0fK sh", value / 1_000) }
+            return group(value) + " sh"
+        }
+    }
+
+    /// A money amount in the market's own currency. Taiwan and Japan quote
+    /// whole units in ordinary use; US amounts keep their cents.
+    static func money(_ value: Double, market: Market) -> String {
+        let digits = market == .us ? 2 : 0
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = digits
+        f.minimumFractionDigits = digits
+        let number = f.string(from: NSNumber(value: value)) ?? String(Int(value))
+        return market.currencySymbol + number
+    }
+
+    /// A clock time in the market's own zone. A Taipei fill stamped in local
+    /// time is a number you have to do arithmetic on before you can use it.
+    static func time(_ date: Date, market: Market = .tw) -> String {
+        market.time(date)
     }
 
     /// Red for the levels that take you out, green for the ones that put you in.
+    ///
+    /// Deliberately **not** flipped per market. This colours what an instruction
+    /// does to your position, not which way the price moved — a stop is a bad
+    /// outcome in Taipei and in New York alike, and flipping it would make the
+    /// same ladder mean opposite things in two panels.
     static func tint(for kind: String) -> Color {
         switch kind {
         case "trim", "reduce", "cut": return .red
@@ -96,6 +148,9 @@ enum StocksFormat {
 struct StocksQuoteRow: View {
     let quote: StockQuote
     var compact = true
+    /// Shown only when the watchlist actually spans markets. On a single-market
+    /// list the badge would be a constant, and a constant on every row is noise.
+    var showsMarketBadge = false
 
     /// Direction of the most recent tick, or nil once it has faded. Drives a
     /// brief tint on the price so a change is visible at a glance — without it
@@ -114,20 +169,32 @@ struct StocksQuoteRow: View {
     /// is one fast pulse, the tint lingers long enough afterwards to be read.
     @State private var blink = false
 
-    /// White while the cell is filled — a saturated green or red background
-    /// leaves green or red text unreadable — then the tick colour, then back
-    /// to normal once the tick has faded.
-    private var priceTint: Color {
-        if blink { return .white }
-        return tick.map { $0 ? Color.green : .red } ?? .primary
+    /// The colour a tick is drawn in, in this row's own market's convention —
+    /// a rise is red in Taipei and Tokyo, green in New York.
+    private var tickTint: Color? {
+        tick.map { quote.market.tint(rising: $0) }
     }
 
-    /// 漲停 / 跌停. Compared against the exchange's own published limits rather
-    /// than a recomputed ±10%, since TWSE rounds them onto the tick grid and
-    /// being a tick out here would report a locked stock as still trading.
+    /// White while the cell is filled — a saturated background leaves same-hue
+    /// text unreadable — then the tick colour, then back to normal once the
+    /// tick has faded.
+    private var priceTint: Color {
+        if blink { return .white }
+        return tickTint ?? .primary
+    }
+
+    /// Limit up / limit down, where the exchange publishes daily limits (Taiwan,
+    /// Japan). Compared against the exchange's own published numbers rather than
+    /// a recomputed percentage, since the limits are rounded onto the tick grid
+    /// and being a tick out here would report a locked stock as still trading.
+    /// US equities have no daily limit, so this is simply never non-nil there.
     private var limitState: (label: String, tint: Color)? {
-        if let up = quote.limitUp, quote.price >= up { return ("漲停", .green) }
-        if let down = quote.limitDown, quote.price <= down { return ("跌停", .red) }
+        if let up = quote.limitUp, quote.price >= up {
+            return ("LIMIT UP", quote.market.tint(rising: true))
+        }
+        if let down = quote.limitDown, quote.price <= down {
+            return ("LIMIT DOWN", quote.market.tint(rising: false))
+        }
         return nil
     }
 
@@ -142,15 +209,25 @@ struct StocksQuoteRow: View {
                 Text(quote.name ?? quote.symbol)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
-                if quote.name != nil {
-                    Text(quote.symbol)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 3) {
+                    if showsMarketBadge {
+                        Text(quote.market.badge)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 3)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 2))
+                    }
+                    if quote.name != nil {
+                        Text(quote.symbol)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
             .frame(width: compact ? 74 : 96, alignment: .leading)
 
-            StocksSparkline(values: quote.series, up: quote.isUp)
+            StocksSparkline(values: quote.series, up: quote.isUp, market: quote.market)
                 .frame(width: compact ? 48 : 72, height: 22)
 
             Spacer(minLength: 4)
@@ -159,7 +236,7 @@ struct StocksQuoteRow: View {
                 HStack(spacing: 4) {
                     if let limit = limitState {
                         Text(limit.label)
-                            .font(.caption2.weight(.bold))
+                            .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -171,25 +248,26 @@ struct StocksQuoteRow: View {
                     // is drawn as a background with negative padding, so it
                     // bleeds past the glyphs without adding any layout of its
                     // own and the row can't shift when it switches on.
-                    Text(StocksFormat.price(quote.price))
+                    Text(StocksFormat.price(quote.price, market: quote.market))
                         .font(.body.monospacedDigit())
                         .contentTransition(.numericText())
                         .foregroundStyle(priceTint)
                         .background {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(tick.map { $0 ? Color.green : .red } ?? .clear)
+                                .fill(tickTint ?? .clear)
                                 .opacity(blink ? 0.9 : 0)
                                 .padding(.horizontal, -4)
                                 .padding(.vertical, -1)
                         }
                 }
                 Text(StocksFormat.changeLine(points: quote.change,
-                                             percent: quote.changePercent))
+                                             percent: quote.changePercent,
+                                             market: quote.market))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(quote.isUp ? .green : .red)
+                    .foregroundStyle(quote.market.tint(rising: quote.isUp))
                     .contentTransition(.numericText())
-                if let lots = quote.volumeLots {
-                    Text(StocksFormat.volume(lots))
+                if let volume = quote.volume {
+                    Text(StocksFormat.volume(volume, unit: quote.volumeUnit))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
                         .contentTransition(.numericText())
@@ -211,14 +289,14 @@ struct StocksQuoteRow: View {
         // than adding any, so nothing reflows when it switches on.
         .background {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(tick.map { $0 ? Color.green : .red } ?? .clear)
+                .fill(tickTint ?? .clear)
                 .opacity(blink ? 0.18 : 0)
                 .padding(.horizontal, -6)
                 .padding(.vertical, -3)
         }
         .onChange(of: quote.price, initial: true) { _, price in
             // The first value a row ever shows isn't a tick — seeding silently
-            // keeps every row from flashing green the moment the popover opens.
+            // keeps every row from flashing the moment the popover opens.
             guard let previous = shownPrice else {
                 shownPrice = price
                 return
@@ -248,21 +326,27 @@ struct StocksQuoteRow: View {
     }
 }
 
-/// Whether quotes are still arriving, and how long since the last one.
+/// Whether quotes are still arriving for one market, and how long since the
+/// last one.
 ///
 /// Per-row flashes only fire when a price *changes*, so on their own they can't
 /// distinguish the two ways a screen full of unchanging numbers happens: a
 /// quiet market, or a feed that died. That ambiguity is exactly what hid the
 /// stale-price bug, so the heartbeat here is tied to the fetch succeeding
 /// rather than to any price moving.
+///
+/// One of these per market, because "live" is a claim each feed has to make for
+/// itself — Tokyo is shut while New York is mid-session, and a single row would
+/// have to lie about one of them.
 struct StocksFeedStatus: View {
+    let market: Market
+    /// Whether to name the market. Off on a single-market watchlist, where the
+    /// name would be a constant repeated under every panel.
+    var labelled = false
     let lastFetch: Date?
     /// The exchange's stamp on the data itself, as opposed to when we fetched
     /// it. Shown because the two differ by more than people expect.
     let quotedAt: Date?
-    /// How long the loop waits between fetches, so the countdown is derived
-    /// from the real cadence rather than a number duplicated in the view.
-    let cadence: TimeInterval
 
     @State private var beat = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -280,6 +364,11 @@ struct StocksFeedStatus: View {
                     .frame(width: 6, height: 6)
                     .scaleEffect(beat ? 1.55 : 1)
                     .opacity(beat ? 1 : 0.75)
+                if labelled {
+                    Text(market.badge)
+                        .font(.system(size: 9, weight: .semibold).monospaced())
+                        .foregroundStyle(.tertiary)
+                }
                 Text(state.label)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -305,8 +394,10 @@ struct StocksFeedStatus: View {
                                                   : AnyShapeStyle(.tertiary))
                 }
             }
+            .lineLimit(1)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel([state.label, countdown].compactMap { $0 }.joined(separator: " "))
+            .accessibilityLabel([market.displayName, state.label, countdown]
+                .compactMap { $0 }.joined(separator: " "))
         }
         .onChange(of: lastFetch) {
             // One pulse per successful fetch. A repeating animation would look
@@ -318,52 +409,59 @@ struct StocksFeedStatus: View {
         }
     }
 
-    /// Seconds until the next fetch is due, or 更新中 while one should be in
-    /// flight. Nil outside the session, where the cadence drops to 15 minutes
+    /// Seconds until the next fetch is due, or "Updating…" while one should be
+    /// in flight. Nil outside the session, where the cadence drops to 15 minutes
     /// and a countdown that long is noise rather than reassurance.
     ///
     /// It stops once the feed is meaningfully late: past that the number would
     /// be counting toward something that isn't coming, and `state` has already
-    /// switched to 延遲/連線中斷, which is the more honest thing to be reading.
+    /// switched to Delayed / Disconnected, which is the more honest thing to be
+    /// reading.
     private func countdown(at now: Date) -> String? {
-        guard cadence <= 60, TWMarketClock.isOpen(now), let lastFetch else { return nil }
+        let cadence = market.cadence(now)
+        guard cadence <= 60, market.isOpen(now), let lastFetch else { return nil }
         let remaining = cadence - now.timeIntervalSince(lastFetch)
         guard remaining > -3 else { return nil }
-        return remaining <= 0 ? "更新中…" : String(format: "%.0fs", remaining.rounded(.up))
+        return remaining <= 0 ? "updating…" : String(format: "%.0fs", remaining.rounded(.up))
     }
 
     /// How old the data itself is, by the exchange's own stamp.
     ///
-    /// Measured on 2026-07-20: MIS stamps a snapshot 5–6s behind its own server
-    /// clock and only advances it every 15–20s, so 7–23s is the normal range
-    /// and none of it is this app's doing. 25s is the line where the reading
-    /// has outlived a full snapshot interval and is worth flagging.
+    /// Measured on 2026-07-20: Taiwan's MIS stamps a snapshot 5–6s behind its
+    /// own server clock and only advances it every 15–20s, so 7–23s is the
+    /// normal range and none of it is this app's doing. The threshold scales
+    /// off the polling cadence so a once-a-minute market isn't flagged for
+    /// being a minute old, which is simply what once-a-minute means.
     private func quoteAge(at now: Date) -> (label: String, late: Bool)? {
-        guard TWMarketClock.isOpen(now), let quotedAt else { return nil }
+        guard market.isOpen(now), let quotedAt else { return nil }
         let age = now.timeIntervalSince(quotedAt)
         guard age >= 0 else { return nil }
-        return (String(format: "報價 −%.0fs", age), age > 25)
+        let tolerance = max(25, market.openCadence * 2)
+        return (String(format: "quote −%.0fs", age), age > tolerance)
     }
 
-    /// Thresholds are generous against the 5s cadence: the exchange's own
-    /// snapshot can repeat for ~25s, and a fetch can be queued behind the rate
-    /// gate, so "late" only starts well past anything routine.
+    /// Thresholds are generous against the cadence: an exchange's own snapshot
+    /// can repeat for ~25s, and a fetch can be queued behind the rate gate, so
+    /// "late" only starts well past anything routine.
     private func state(at now: Date) -> (tint: Color, label: String) {
-        guard TWMarketClock.isOpen(now) else {
-            return (.secondary, lastFetch.map { "已收盤 · \(StocksFormat.time($0))" } ?? "已收盤")
+        guard market.isOpen(now) else {
+            return (.secondary, lastFetch.map { "Closed · \(market.time($0))" } ?? "Closed")
         }
-        guard let lastFetch else { return (.secondary, "尚未更新") }
+        guard let lastFetch else { return (.secondary, "No data yet") }
         let age = now.timeIntervalSince(lastFetch)
-        if age <= 30 { return (.green, "即時") }
-        if age <= 120 { return (.orange, String(format: "延遲 %.0f 秒", age)) }
-        return (.red, "連線中斷 · \(StocksFormat.time(lastFetch))")
+        let late = max(30, market.openCadence * 4)
+        if age <= late { return (.green, "Live") }
+        if age <= late * 4 { return (.orange, String(format: "Delayed %.0fs", age)) }
+        return (.red, "Disconnected · \(market.time(lastFetch))")
     }
 }
 
-/// A minimal line chart for an intraday series.
+/// A minimal line chart for an intraday series, drawn in the market's own
+/// up/down convention.
 struct StocksSparkline: View {
     let values: [Double]
     let up: Bool
+    var market: Market = .tw
 
     var body: some View {
         GeometryReader { geo in
@@ -378,7 +476,7 @@ struct StocksSparkline: View {
                         else { path.addLine(to: CGPoint(x: x, y: y)) }
                     }
                 }
-                .stroke(up ? Color.green : Color.red, lineWidth: 1.5)
+                .stroke(market.tint(rising: up), lineWidth: 1.5)
             } else {
                 Rectangle().fill(.quaternary).frame(height: 1)
                     .frame(maxHeight: .infinity, alignment: .center)
@@ -448,8 +546,8 @@ struct StocksPlanBoard: View {
                 // `ViewThatFits` compares each candidate's *ideal* size against
                 // the space on offer, and the ideal width of a Text is its
                 // full unwrapped line — so without a stated ideal, one long
-                // 條件 sentence makes this pane measure ~600pt and lose to the
-                // single column in a window that could comfortably hold it.
+                // condition sentence makes this pane measure ~600pt and lose to
+                // the single column in a window that could comfortably hold it.
                 // Stating the ideal lets the prose still expand to fill a wider
                 // window via `maxWidth`.
                 .frame(idealWidth: 250, maxWidth: .infinity, alignment: .topLeading)
@@ -474,7 +572,8 @@ struct StocksPlanBoard: View {
                     }
                     .buttonStyle(.plain)
 
-                    StocksLevelLadder(rows: rows, price: quote(for: stock)?.price)
+                    StocksLevelLadder(rows: rows, price: quote(for: stock)?.price,
+                                      market: stock.symbol?.market ?? .tw)
 
                     if selection == stock.stockId {
                         StocksStockDetail(
@@ -493,7 +592,7 @@ struct StocksPlanBoard: View {
 
     /// The weighted index, quoted whenever the plan defines a market gate.
     private var indexQuote: StockQuote? {
-        quotes.first { TWSymbol($0.key)?.isIndex == true }?.value
+        quotes.first { MarketSymbol($0.key)?.isIndex == true }?.value
     }
 
     private var selected: StrategyPlan.StockPlan? {
@@ -505,7 +604,7 @@ struct StocksPlanBoard: View {
     /// match the plan's `stockId` — so match on the parsed symbol, not the text.
     private func quote(for stock: StrategyPlan.StockPlan) -> StockQuote? {
         guard let symbol = stock.symbol else { return nil }
-        return quotes.first { TWSymbol($0.key) == symbol }?.value
+        return quotes.first { MarketSymbol($0.key) == symbol }?.value
     }
 }
 
@@ -546,7 +645,7 @@ struct StocksHoldingsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("持股").font(.headline)
+                Text("Holdings").font(.headline)
                 if let updated = source.holdings?.updatedAt {
                     Text(updated)
                         .font(.caption)
@@ -555,7 +654,7 @@ struct StocksHoldingsSection: View {
                 Spacer(minLength: 0)
                 if source.canEdit && !isEditing {
                     Button { isEditing = true } label: {
-                        Label("編輯", systemImage: "pencil")
+                        Label("Edit", systemImage: "pencil")
                     }
                     .font(.caption).controlSize(.small).buttonStyle(.borderless)
                 }
@@ -564,20 +663,20 @@ struct StocksHoldingsSection: View {
                         // The label doubles as the confirmation. A copy leaves
                         // no visible trace anywhere else, and a button that
                         // looks identical before and after reads as broken.
-                        Label(copied ? "已複製" : "複製",
+                        Label(copied ? "Copied" : "Copy",
                               systemImage: copied ? "checkmark" : "doc.on.doc")
                     }
                     .font(.caption).controlSize(.small).buttonStyle(.borderless)
                     .foregroundStyle(copied ? Color.green : Color.accentColor)
-                    .help("複製完整持股 JSON，格式與原檔一致")
+                    .help("Copy the full holdings JSON, in the file's own shape")
                 }
                 Button { source.chooseFile() } label: {
-                    Label("匯入", systemImage: "square.and.arrow.down")
+                    Label("Import", systemImage: "square.and.arrow.down")
                 }
                 .font(.caption).controlSize(.small).buttonStyle(.borderless)
                 if source.displayPath != nil && !isEditing {
                     Button { source.reload() } label: {
-                        Label("重載", systemImage: "arrow.clockwise")
+                        Label("Reload", systemImage: "arrow.clockwise")
                     }
                     .font(.caption).controlSize(.small).buttonStyle(.borderless)
                 }
@@ -590,7 +689,7 @@ struct StocksHoldingsSection: View {
             }
 
             if source.holdings == nil {
-                Text("匯入每日持股 JSON，關卡通知就會直接換算成股數。")
+                Text("Import your daily holdings JSON and level alerts will be converted straight into share counts.")
                     .font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -602,7 +701,7 @@ struct StocksHoldingsSection: View {
                     .id(source.holdings?.updatedAt ?? "-")
             } else if let holdings = source.holdings {
                 if source.isStale {
-                    Label("持股非今日資料，股數換算可能已過時",
+                    Label("Holdings aren't from today — share counts may be out of date",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2.weight(.medium)).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
@@ -621,8 +720,8 @@ struct StocksHoldingsSection: View {
                 // while looking after itself.
                 let uncovered = holdings.positions.filter { !plannedIDs.contains($0.stockId) }
                 if !uncovered.isEmpty {
-                    Label("無計畫：\(uncovered.map(\.displayName).joined(separator: "、"))　"
-                          + "（不在計畫內，不會有任何通知）",
+                    Label("No plan: \(uncovered.map(\.displayName).joined(separator: ", "))"
+                          + " — not covered, so nothing will ever alert",
                           systemImage: "shield.slash")
                         .font(.caption2).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
@@ -633,7 +732,7 @@ struct StocksHoldingsSection: View {
 
     private func quote(for position: HoldingPosition) -> StockQuote? {
         guard let symbol = position.symbol else { return nil }
-        return quotes.first { TWSymbol($0.key) == symbol }?.value
+        return quotes.first { MarketSymbol($0.key) == symbol }?.value
     }
 }
 
@@ -641,6 +740,8 @@ private struct StocksHoldingRow: View {
     let position: HoldingPosition
     let quote: StockQuote?
     let isPlanned: Bool
+
+    private var market: Market { position.market }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -652,19 +753,21 @@ private struct StocksHoldingRow: View {
                             .font(.system(size: 8)).foregroundStyle(.orange)
                     }
                 }
-                Text("\(Int(position.shares)) 股 @ \(StocksFormat.price(position.avgCost))")
+                Text("\(Int(position.shares)) sh @ \(StocksFormat.price(position.avgCost, market: market))")
                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
             if let quote {
                 let pl = position.profit(at: quote.price)
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(money(position.marketValue(at: quote.price)))
+                    Text(StocksFormat.money(position.marketValue(at: quote.price), market: market))
                         .font(.caption.monospacedDigit())
-                    Text("\(pl >= 0 ? "+" : "−")\(money(abs(pl)))　"
+                    Text("\(pl >= 0 ? "+" : "−")\(StocksFormat.money(abs(pl), market: market))  "
                          + StocksFormat.signedPercent(position.profitPercent(at: quote.price)))
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(pl >= 0 ? .green : .red)
+                        // A gain is red in Taipei and Tokyo, green in New York —
+                        // the same convention the price rows use.
+                        .foregroundStyle(market.tint(rising: pl >= 0))
                 }
             } else {
                 Text("—").font(.caption2).foregroundStyle(.tertiary)
@@ -673,60 +776,80 @@ private struct StocksHoldingRow: View {
         .lineLimit(1)
         .minimumScaleFactor(0.75)
     }
-
-    private func money(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? String(Int(v))
-    }
 }
 
+/// Portfolio value, **one line per currency**.
+///
+/// Summing a Tokyo position and a Taipei one into a single number would be
+/// arithmetic on incompatible units dressed up as a total — 100 JPY added to
+/// 100 TWD is not 200 of anything. Converting them would need an FX rate this
+/// glance doesn't fetch and couldn't timestamp honestly. So each currency is
+/// totalled separately and left that way.
 private struct StocksPortfolioTotals: View {
     let holdings: Holdings
     let quotes: [String: StockQuote]
 
+    private struct Total {
+        let market: Market
+        var value: Double = 0
+        var cost: Double = 0
+        var profit: Double { value - cost }
+    }
+
     var body: some View {
         let priced = holdings.positions.compactMap { position -> (HoldingPosition, Double)? in
             guard let symbol = position.symbol,
-                  let quote = quotes.first(where: { TWSymbol($0.key) == symbol })?.value
+                  let quote = quotes.first(where: { MarketSymbol($0.key) == symbol })?.value
             else { return nil }
             return (position, quote.price)
         }
-        let value = priced.reduce(0) { $0 + $1.0.marketValue(at: $1.1) }
-        let cost = priced.reduce(0) { $0 + $1.0.costBasis }
-        let pl = value - cost
 
-        VStack(alignment: .leading, spacing: 1) {
+        var byMarket: [Market: Total] = [:]
+        for (position, price) in priced {
+            var total = byMarket[position.market] ?? Total(market: position.market)
+            total.value += position.marketValue(at: price)
+            total.cost += position.costBasis
+            byMarket[position.market] = total
+        }
+        let totals = Market.allCases.compactMap { byMarket[$0] }
+
+        return VStack(alignment: .leading, spacing: 1) {
             Divider().padding(.vertical, 2)
-            HStack(spacing: 6) {
-                Text("市值 \(money(value))").font(.caption.weight(.medium).monospacedDigit())
-                if cost > 0 {
-                    Text("\(pl >= 0 ? "+" : "−")\(money(abs(pl)))　"
-                         + StocksFormat.signedPercent(pl / cost * 100))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(pl >= 0 ? .green : .red)
+            ForEach(totals, id: \.market) { total in
+                HStack(spacing: 6) {
+                    Text((totals.count > 1 ? "\(total.market.badge) " : "")
+                         + "Value \(StocksFormat.money(total.value, market: total.market))")
+                        .font(.caption.weight(.medium).monospacedDigit())
+                    if total.cost > 0 {
+                        Text("\(total.profit >= 0 ? "+" : "−")"
+                             + StocksFormat.money(abs(total.profit), market: total.market) + "  "
+                             + StocksFormat.signedPercent(total.profit / total.cost * 100))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(total.market.tint(rising: total.profit >= 0))
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
             }
             if let cash = holdings.cash {
-                Text("現金 \(money(cash))　總計 \(money(value + cash))")
+                let market = holdings.cashMarket
+                // Cash is added to its own market's value only. Where the
+                // portfolio spans currencies there is no single "grand total"
+                // to print, and inventing one would be the exact conversion
+                // this view refuses to guess at.
+                let sameMarket = byMarket[market]?.value ?? 0
+                Text("Cash \(StocksFormat.money(cash, market: market))"
+                     + (totals.count <= 1
+                        ? "  Total \(StocksFormat.money(sameMarket + cash, market: market))"
+                        : "  \(market.badge) total \(StocksFormat.money(sameMarket + cash, market: market))"))
                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
             if priced.count < holdings.positions.count {
-                Text("（\(holdings.positions.count - priced.count) 檔尚無報價，未計入）")
+                Text("(\(holdings.positions.count - priced.count) not yet quoted, excluded)")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-    }
-
-    private func money(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? String(Int(v))
     }
 }
 
@@ -762,7 +885,7 @@ struct StocksHoldingsEditor: View {
                         // never pushes the delete button off the edge.
                         TextField("TWSE-2330", text: $row.stockId)
                             .frame(width: 84)
-                        TextField("名稱", text: $row.name)
+                        TextField("Name", text: $row.name)
                             .frame(minWidth: 40)
                         Button {
                             rows.removeAll { $0.id == row.id }
@@ -773,10 +896,10 @@ struct StocksHoldingsEditor: View {
                         .foregroundStyle(.red)
                     }
                     HStack(spacing: 4) {
-                        TextField("股數", text: $row.shares)
+                        TextField("Shares", text: $row.shares)
                             .frame(width: 64)
-                        Text("股 @").font(.caption2).foregroundStyle(.secondary)
-                        TextField("均價", text: $row.avgCost)
+                        Text("sh @").font(.caption2).foregroundStyle(.secondary)
+                        TextField("Avg cost", text: $row.avgCost)
                             .frame(width: 70)
                         Spacer(minLength: 0)
                     }
@@ -789,13 +912,13 @@ struct StocksHoldingsEditor: View {
                 Button {
                     rows.append(HoldingDraftRow())
                 } label: {
-                    Label("新增一檔", systemImage: "plus")
+                    Label("Add a row", systemImage: "plus")
                 }
                 .buttonStyle(.borderless).font(.caption)
 
                 Spacer(minLength: 0)
 
-                Text("現金").font(.caption2).foregroundStyle(.secondary)
+                Text("Cash").font(.caption2).foregroundStyle(.secondary)
                 TextField("0", text: $cash)
                     .textFieldStyle(.roundedBorder)
                     .font(.caption.monospacedDigit())
@@ -810,14 +933,14 @@ struct StocksHoldingsEditor: View {
 
             // Saving rewrites the watched file, so say what that costs before
             // the button rather than after.
-            Text("儲存會寫回持股檔；之後從交易紀錄重新匯出會覆蓋這裡的修改。")
+            Text("Saving writes back to the holdings file. Re-exporting from your trade log will overwrite these edits.")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Button("儲存") { commit() }
+                Button("Save") { commit() }
                     .buttonStyle(.borderedProminent)
-                Button("取消") { isEditing = false }
+                Button("Cancel") { isEditing = false }
             }
             .controlSize(.small)
         }
@@ -843,22 +966,23 @@ struct StocksHoldingsEditor: View {
         var positions: [HoldingPosition] = []
         for row in rows {
             let id = row.stockId.trimmingCharacters(in: .whitespaces).uppercased()
-            // A blank row is how you abandon a "新增" you thought better of.
+            // A blank row is how you abandon an "Add a row" you thought better of.
             if id.isEmpty && row.shares.isEmpty && row.avgCost.isEmpty { continue }
-            guard !id.isEmpty else { problem = "有一列缺少代號"; return }
-            guard TWSymbol(id) != nil else {
-                problem = "無法辨識代號 \(id)（上櫃請寫 TPEX-3491）"; return
+            guard !id.isEmpty else { problem = "A row is missing its symbol"; return }
+            guard MarketSymbol(id) != nil else {
+                problem = "Can't read the symbol \(id) — use TPEX-3491 for Taipei OTC, TSE-7203 for Tokyo"
+                return
             }
             guard let shares = Double(row.shares.trimmingCharacters(in: .whitespaces)),
                   shares >= 0 else {
-                problem = "\(id) 的股數不是數字"; return
+                problem = "\(id): shares isn't a number"; return
             }
             guard let cost = Double(row.avgCost.trimmingCharacters(in: .whitespaces)),
                   cost >= 0 else {
-                problem = "\(id) 的均價不是數字"; return
+                problem = "\(id): average cost isn't a number"; return
             }
             guard !positions.contains(where: { $0.stockId == id }) else {
-                problem = "\(id) 重複"; return
+                problem = "\(id) appears twice"; return
             }
             positions.append(HoldingPosition(
                 stockId: id,
@@ -871,13 +995,16 @@ struct StocksHoldingsEditor: View {
         var cashValue: Double?
         if !cashText.isEmpty {
             guard let parsed = Double(cashText), parsed >= 0 else {
-                problem = "現金不是數字"; return
+                problem = "Cash isn't a number"; return
             }
             cashValue = parsed
         }
 
-        let edited = Holdings(updatedAt: TWMarketClock.tradingDay(),
+        // The currency is carried through untouched: it is a property of the
+        // account, not of anything editable on this sheet.
+        let edited = Holdings(updatedAt: Market.tw.tradingDay(),
                               cash: cashValue,
+                              currency: source.holdings?.currency,
                               positions: positions)
         if let failure = source.save(edited) {
             problem = failure
@@ -901,33 +1028,33 @@ struct StocksPlanToolbar: View {
     var body: some View {
         HStack(spacing: 8) {
             Button { source.chooseFile() } label: {
-                Label("匯入", systemImage: "square.and.arrow.down")
+                Label("Import", systemImage: "square.and.arrow.down")
             }
-            .help("選擇每日交易計畫 JSON")
+            .help("Choose the daily trading-plan JSON")
 
             if !source.archives.isEmpty {
                 Menu {
                     ForEach(source.archives) { archive in
-                        Button("\(archive.date)　\(archive.stockCount) 檔") {
+                        Button("\(archive.date)  ·  \(archive.stockCount) stocks") {
                             source.loadArchive(archive)
                         }
                     }
                 } label: {
-                    Label("記錄", systemImage: "clock.arrow.circlepath")
+                    Label("History", systemImage: "clock.arrow.circlepath")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("載入先前的計畫")
+                .help("Load an earlier plan")
             }
 
             if source.isPinned {
                 Button { source.goLive() } label: {
-                    Label("即時", systemImage: "dot.radiowaves.left.and.right")
+                    Label("Live", systemImage: "dot.radiowaves.left.and.right")
                 }
-                .help("回到目前監看的計畫檔")
+                .help("Return to the plan file being watched")
             } else if source.displayPath != nil {
                 Button { source.reload() } label: {
-                    Label("重載", systemImage: "arrow.clockwise")
+                    Label("Reload", systemImage: "arrow.clockwise")
                 }
             }
 
@@ -949,13 +1076,13 @@ struct StocksPlanStatus: View {
     var body: some View {
         if source.isPinned {
             VStack(alignment: .leading, spacing: 4) {
-                Label("檢視 \(source.pinnedArchiveDate ?? "") 的歷史計畫 · 通知已暫停",
+                Label("Viewing the \(source.pinnedArchiveDate ?? "") plan · alerts paused",
                       systemImage: "clock.arrow.circlepath")
                     .font(.caption2.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
                 // Reviewing an old plan and trading one are different intents,
                 // so arming it is a deliberate second tap rather than a guess.
-                Button("設為使用中") { source.activatePinned() }
+                Button("Make this the active plan") { source.activatePinned() }
                     .font(.caption2)
                     .controlSize(.small)
                     .buttonStyle(.borderless)
@@ -966,7 +1093,7 @@ struct StocksPlanStatus: View {
             .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
         } else if source.isStale, let date = source.plan?.date {
             // A plan more than a day old quotes moving averages that have moved.
-            Label("\(date) 的計畫，非今日", systemImage: "exclamationmark.triangle.fill")
+            Label("Plan dated \(date), not today", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
@@ -981,14 +1108,14 @@ struct StocksPlanEmptyState: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("尚未載入交易計畫", systemImage: "doc.text.magnifyingglass")
+            Label("No trading plan loaded", systemImage: "doc.text.magnifyingglass")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text("匯入每日計畫 JSON，價格觸及關卡時會推送通知。存檔後會自動重新載入。")
+            Text("Import your daily plan JSON and you'll get a notification when the price reaches a level. It reloads automatically whenever you save the file.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("匯入計畫…") { source.chooseFile() }
+            Button("Import plan…") { source.chooseFile() }
                 .controlSize(.small)
         }
         .padding(.vertical, 2)
@@ -1005,7 +1132,7 @@ struct StocksMarketHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                Text("交易計畫").font(.headline)
+                Text("Trading plan").font(.headline)
                 if let date = plan.date {
                     Text(date).font(.caption).foregroundStyle(.secondary)
                 }
@@ -1025,7 +1152,8 @@ struct StocksMarketHeader: View {
             // The gate is the loudest thing on the board when it's broken —
             // it changes what every other row means.
             if gateBreached {
-                Label("大盤破線 · 新倉通知已停止", systemImage: "exclamationmark.octagon.fill")
+                Label("Index below the gate · new-position alerts stopped",
+                      systemImage: "exclamationmark.octagon.fill")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.red)
                     .padding(.horizontal, 8).padding(.vertical, 4)
@@ -1036,10 +1164,10 @@ struct StocksMarketHeader: View {
                 // any entry alert can fire today is the gap between it and the
                 // live index, so show both together.
                 HStack(spacing: 4) {
-                    Text("大盤關卡 \(StocksFormat.price(line))")
+                    Text("Index gate \(StocksFormat.price(line))")
                         .font(.caption2).foregroundStyle(.secondary)
                     if let index {
-                        Text("· 現 \(StocksFormat.price(index.price))")
+                        Text("· now \(StocksFormat.price(index.price))")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                         Text(StocksFormat.signedPercent((index.price - line) / line * 100))
@@ -1053,8 +1181,8 @@ struct StocksMarketHeader: View {
                 // The remaining rungs, so the staircase down to "new positions
                 // stop" is visible before you're standing on the last step.
                 if let rungs = plan.market?.gate?.rungs, rungs.count > 1 {
-                    Text("關卡階梯 " + rungs.map(StocksFormat.price).joined(separator: " → ")
-                         + "（破最後一道才停新倉）")
+                    Text("Gate ladder " + rungs.map { StocksFormat.price($0) }.joined(separator: " → ")
+                         + " (only the last rung halts new positions)")
                         .font(.caption2).foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1086,9 +1214,9 @@ struct StocksPlanListRow: View {
                     Text(stock.displayName).font(.subheadline.weight(.semibold))
                     Spacer(minLength: 0)
                     if let quote {
-                        Text(StocksFormat.price(quote.price))
+                        Text(StocksFormat.price(quote.price, market: quote.market))
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(quote.isUp ? .green : .red)
+                            .foregroundStyle(quote.market.tint(rising: quote.isUp))
                     }
                 }
                 HStack(spacing: 5) {
@@ -1141,9 +1269,9 @@ struct StocksStockHeader: View {
             }
             Spacer(minLength: 0)
             if let quote {
-                Text(StocksFormat.price(quote.price))
+                Text(StocksFormat.price(quote.price, market: quote.market))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(quote.isUp ? .green : .red)
+                    .foregroundStyle(quote.market.tint(rising: quote.isUp))
             }
         }
         .contentShape(Rectangle())
@@ -1163,6 +1291,10 @@ struct StocksStockHeader: View {
 struct StocksLevelLadder: View {
     let rows: [LevelStatus]
     let price: Double?
+    /// Only used for number formatting — the rung colours come from what each
+    /// level *does* (see `StocksFormat.tint(for:)`), which doesn't flip by
+    /// market.
+    var market: Market = .tw
 
     var body: some View {
         let rungs = rungs()
@@ -1188,7 +1320,7 @@ struct StocksLevelLadder: View {
     /// standing is the worst possible moment to lose it.
     private func levelRung(_ status: LevelStatus, isCurrent: Bool) -> some View {
         HStack(spacing: 6) {
-            Text(status.line.map(StocksFormat.price) ?? "—")
+            Text(status.line.map { StocksFormat.price($0, market: market) } ?? "—")
                 .font(.caption.monospacedDigit().weight(isCurrent ? .semibold : .regular))
                 .foregroundStyle(isCurrent ? .primary : .secondary)
                 .frame(width: 46, alignment: .trailing)
@@ -1202,7 +1334,7 @@ struct StocksLevelLadder: View {
                 .foregroundStyle(StocksFormat.tint(for: status.kind))
 
             if let band = status.band, band.count >= 2 {
-                Text("\(StocksFormat.price(band[0]))–\(StocksFormat.price(band[band.count - 1]))")
+                Text("\(StocksFormat.price(band[0], market: market))–\(StocksFormat.price(band[band.count - 1], market: market))")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -1214,19 +1346,19 @@ struct StocksLevelLadder: View {
                     .font(.caption2).foregroundStyle(.green)
             } else if status.needsHistory {
                 // This level cannot fire yet. Saying so beats looking armed.
-                Text("待日線")
+                Text("needs bars")
                     .font(.caption2).foregroundStyle(.orange)
             } else if status.isSuppressedByGate {
                 Image(systemName: "hand.raised.fill")
                     .font(.caption2).foregroundStyle(.secondary)
             } else if status.isAdvisoryOnly {
-                Text("僅提示").font(.caption2).foregroundStyle(.tertiary)
+                Text("advisory").font(.caption2).foregroundStyle(.tertiary)
             }
 
-            // Last in the row, so 現價 lands on the same right-hand edge whether
-            // or not this level also carries a status marker — a label that
-            // shifts left when a checkmark appears is one the eye has to hunt
-            // for on the very rung it should find fastest.
+            // Last in the row, so "Now" lands on the same right-hand edge
+            // whether or not this level also carries a status marker — a label
+            // that shifts left when a checkmark appears is one the eye has to
+            // hunt for on the very rung it should find fastest.
             if isCurrent { currentPriceTag }
         }
         .frame(height: 18)
@@ -1237,7 +1369,7 @@ struct StocksLevelLadder: View {
 
     private func priceRung(_ value: Double) -> some View {
         HStack(spacing: 6) {
-            Text(StocksFormat.price(value))
+            Text(StocksFormat.price(value, market: market))
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .frame(width: 46, alignment: .trailing)
 
@@ -1257,7 +1389,7 @@ struct StocksLevelLadder: View {
     /// One definition, used by both rung shapes, so the tag can't drift between
     /// the standalone marker and the one merged onto a level.
     private var currentPriceTag: some View {
-        Text("現價")
+        Text("NOW")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(Color.accentColor)
     }
@@ -1290,8 +1422,9 @@ struct StocksLevelLadder: View {
         // level you're standing on is the one whose instruction you most need.
         //
         // Every level at that price is marked, not just the first: a plan can
-        // put 減碼 and 重進 on the same line, and picking one to highlight would
-        // hide the other behind the very marker meant to draw the eye.
+        // put a trim and a re-entry on the same line, and picking one to
+        // highlight would hide the other behind the very marker meant to draw
+        // the eye.
         var out = sorted.map { status in
             Rung(id: status.id,
                  content: .level(status, isCurrent: price.map { sitsOn(status.line, $0) } ?? false))
@@ -1312,6 +1445,11 @@ struct StocksLevelLadder: View {
 /// Everything the plan says about one stock: the ladder, each level's prose and
 /// position size, today's alerts, what to watch, upcoming events, and the
 /// evidence the plan was built on.
+///
+/// Prose that comes out of the plan file — conditions, sources, notes, watch
+/// items — is rendered verbatim, in whatever language it was written in. It is
+/// the user's own writing, and a mis-glossed trade instruction is a much worse
+/// failure than an untranslated one.
 struct StocksStockDetail: View {
     let stock: StrategyPlan.StockPlan
     let rows: [LevelStatus]
@@ -1319,30 +1457,33 @@ struct StocksStockDetail: View {
     let alerts: [StrategyAlert]
     var showsLadder = true
 
+    private var market: Market { stock.symbol?.market ?? .tw }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if showsLadder {
                 header
-                StocksLevelLadder(rows: rows, price: quote?.price)
+                StocksLevelLadder(rows: rows, price: quote?.price, market: market)
             }
 
             if !alerts.isEmpty {
-                detailGroup("今日通知") {
+                detailGroup("Today's alerts") {
                     ForEach(alerts) { alert in
                         HStack(alignment: .top, spacing: 6) {
-                            Text(StocksFormat.time(alert.firedAt))
+                            Text(StocksFormat.time(alert.firedAt, market: market))
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.secondary)
                             // An approach warning and a real trigger must never
                             // look alike in a list you scan in a hurry.
                             if let band = alert.approachBand {
-                                Text("接近\(StocksFormat.levelLabel(alert.levelKind)) "
-                                     + StocksFormat.price(band)
-                                     + (alert.approachBandIsTWD ? " 元" : "%"))
+                                Text("nearing \(StocksFormat.levelLabel(alert.levelKind)) "
+                                     + (alert.approachBandIsTWD
+                                        ? StocksFormat.money(band, market: market)
+                                        : StocksFormat.price(band, market: market) + "%"))
                                     .font(.caption2)
                                     .foregroundStyle(.orange)
                             } else {
-                                Text("\(StocksFormat.levelLabel(alert.levelKind)) \(StocksFormat.price(alert.price))")
+                                Text("\(StocksFormat.levelLabel(alert.levelKind)) \(StocksFormat.price(alert.price, market: market))")
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(StocksFormat.tint(for: alert.levelKind))
                             }
@@ -1353,7 +1494,7 @@ struct StocksStockDetail: View {
 
             // The prose is the part you actually act on, so each level gets its
             // condition in full rather than truncated to a number.
-            detailGroup("關卡條件") {
+            detailGroup("Level conditions") {
                 ForEach(rows) { row in
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 5) {
@@ -1361,11 +1502,12 @@ struct StocksStockDetail: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(StocksFormat.tint(for: row.kind))
                             if let line = row.line {
-                                Text(StocksFormat.price(line))
+                                Text(StocksFormat.price(line, market: market))
                                     .font(.caption.monospacedDigit())
                             }
                             // The quantity is the actionable half of a level and
-                            // gets weight to match — not a grey footnote.
+                            // gets weight to match — not a grey footnote. Shown
+                            // verbatim: it is a trade instruction.
                             if let action = row.size?.action {
                                 Text(action)
                                     .font(.caption2.weight(.semibold))
@@ -1382,7 +1524,7 @@ struct StocksStockDetail: View {
                             // The fraction is the plan's language; the share
                             // count is what you type into a broker.
                             if let shares = row.instruction?.shares {
-                                Text("≈ \(shares) 股")
+                                Text("≈ \(shares) sh")
                                     .font(.caption2.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(row.instruction?.isShort == true ? .orange : .primary)
                             } else if let note = row.instruction?.note {
@@ -1398,7 +1540,7 @@ struct StocksStockDetail: View {
                         }
                         if row.instruction?.isShort == true,
                            let affordable = row.instruction?.affordableShares {
-                            Text("現金僅夠 \(affordable) 股")
+                            Text("Cash covers only \(affordable) sh")
                                 .font(.caption2).foregroundStyle(.orange)
                         }
                         if let source = row.source {
@@ -1413,12 +1555,12 @@ struct StocksStockDetail: View {
             }
 
             if let band = stock.target?.band, band.count >= 2 {
-                detailGroup("目標") {
+                detailGroup("Target") {
                     HStack(spacing: 5) {
-                        Text("\(StocksFormat.price(band[0]))–\(StocksFormat.price(band[band.count - 1]))")
+                        Text("\(StocksFormat.price(band[0], market: market))–\(StocksFormat.price(band[band.count - 1], market: market))")
                             .font(.caption.weight(.semibold).monospacedDigit())
                         if let quote, band[0] > 0 {
-                            Text("還有 \(StocksFormat.signedPercent((band[0] - quote.price) / quote.price * 100))")
+                            Text("\(StocksFormat.signedPercent((band[0] - quote.price) / quote.price * 100)) to go")
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
@@ -1431,17 +1573,17 @@ struct StocksStockDetail: View {
             }
 
             if let path = stock.positionPath {
-                detailGroup("部位階梯") {
+                detailGroup("Position ladder") {
                     if let up = path.up, !up.isEmpty {
-                        Text("加：\(up.joined(separator: " → "))")
+                        Text("Up: \(up.joined(separator: " → "))")
                             .font(.caption2.monospacedDigit()).foregroundStyle(.green)
                     }
                     if let down = path.down, !down.isEmpty {
-                        Text("減：\(down.joined(separator: " → "))")
+                        Text("Down: \(down.joined(separator: " → "))")
                             .font(.caption2.monospacedDigit()).foregroundStyle(.red)
                     }
                     if let max = path.max {
-                        Text("上限 \(max)").font(.caption2.weight(.medium))
+                        Text("Cap \(max)").font(.caption2.weight(.medium))
                     }
                     if let note = path.note {
                         Text(note).font(.caption2).foregroundStyle(.tertiary)
@@ -1451,7 +1593,7 @@ struct StocksStockDetail: View {
             }
 
             if let watch = stock.watchToday, !watch.isEmpty {
-                detailGroup("今日觀察") {
+                detailGroup("Watch today") {
                     ForEach(Array(watch.enumerated()), id: \.offset) { _, item in
                         Label(item, systemImage: "circle")
                             .font(.caption2)
@@ -1462,7 +1604,7 @@ struct StocksStockDetail: View {
             }
 
             if let events = stock.events, !events.isEmpty {
-                detailGroup("事件") {
+                detailGroup("Events") {
                     ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                         HStack(alignment: .top, spacing: 6) {
                             Text(event.date ?? "—")
@@ -1488,7 +1630,7 @@ struct StocksStockDetail: View {
             }
 
             if let evidence = stock.evidence, !evidence.isEmpty {
-                detailGroup("依據") {
+                detailGroup("Basis") {
                     ForEach(Array(evidence.enumerated()), id: \.offset) { _, item in
                         Text(item.value ?? item.item ?? "")
                             .font(.caption2)
@@ -1510,27 +1652,30 @@ struct StocksStockDetail: View {
                     .background(.quaternary, in: Capsule())
             }
             if let score = stock.score {
-                Text("\(score)分").font(.caption2).foregroundStyle(.secondary)
+                Text("score \(score)").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             if let quote {
                 Text(StocksFormat.signedPercent(quote.changePercent))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(quote.isUp ? .green : .red)
+                    .foregroundStyle(quote.market.tint(rising: quote.isUp))
             }
         }
     }
 
+    /// Known event types get an English name; anything else is passed through
+    /// as the plan wrote it, so a new event type shows up rather than vanishing.
     private func eventLabel(_ event: StrategyPlan.PlanEvent) -> String {
         let name: String
         switch event.type {
-        case "ex_dividend": name = "除息"
-        case "monthly_revenue": name = "月營收"
+        case "ex_dividend": name = "Ex-dividend"
+        case "monthly_revenue": name = "Monthly revenue"
+        case "earnings": name = "Earnings"
         case "fomc": name = "FOMC"
-        default: name = event.type ?? "事件"
+        default: name = event.type ?? "Event"
         }
         guard let value = event.value else { return name }
-        return "\(name) \(StocksFormat.price(value))"
+        return "\(name) \(StocksFormat.price(value, market: market))"
     }
 
     @ViewBuilder
