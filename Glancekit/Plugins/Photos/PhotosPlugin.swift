@@ -207,15 +207,13 @@ private struct PhotosSettings: View {
     @Bindable var plugin: PhotosPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Source")
-                .font(.headline)
+        SettingsPage("Source") {
             Picker("", selection: $plugin.source) {
                 ForEach(PhotoSourceKind.allCases) { kind in
                     Text(kind.label).tag(kind)
                 }
             }
-            .pickerStyle(.radioGroup)
+            .pickerStyle(.segmented)
             .labelsHidden()
 
             switch plugin.source {
@@ -259,16 +257,13 @@ private struct PhotosSettings: View {
 
             Divider()
 
-            Text("Slide interval")
-                .font(.headline)
+            SettingsSectionHeader("Slide interval")
             Stepper(value: $plugin.slideInterval, in: 2...60, step: 1) {
                 Text("\(Int(plugin.slideInterval)) seconds")
             }
 
             if let err = plugin.lastError {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp(err)
             }
         }
         .onAppear {

@@ -8,14 +8,7 @@ struct QuickSwitchSettingsView: View {
     @Environment(HotkeyCenter.self) private var hotkeys
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Quick Switch")
-                .font(.headline)
-
-            Text(intro)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage("Quick Switch", intro: intro) {
             // Split the same way the Glances page is, so the rows the shortcut
             // actually steps through read as a ring on their own rather than
             // having to be picked out of a mixed list. The glances that are off
@@ -58,8 +51,6 @@ struct QuickSwitchSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-
-            Spacer(minLength: 0)
         }
     }
 

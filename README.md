@@ -45,7 +45,7 @@ Glances are grouped into categories in Settings.
 
 | Glance | What it shows |
 | --- | --- |
-| Stocks | Live quotes for tickers you follow |
+| Stocks | Live quotes for tickers you follow, across Taiwan, the US and Japan |
 | Currency | A base currency tracked against a list of targets |
 
 ### Developer

@@ -361,19 +361,17 @@ private struct TimeProdSettings: View {
     @State private var zonesText: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Features").font(.headline)
-            Toggle("World clocks", isOn: $plugin.worldClocksEnabled)
-            Toggle("Calendar next event", isOn: $plugin.calendarEnabled)
-            Toggle("Reminders", isOn: $plugin.remindersEnabled)
-            Toggle("Countdown", isOn: $plugin.countdownEnabled)
-            Toggle("Meeting join button", isOn: $plugin.meetingJoinEnabled)
+        SettingsPage("Features") {
+            SettingsToggleRow("World clocks", isOn: $plugin.worldClocksEnabled)
+            SettingsToggleRow("Calendar next event", isOn: $plugin.calendarEnabled)
+            SettingsToggleRow("Reminders", isOn: $plugin.remindersEnabled)
+            SettingsToggleRow("Countdown", isOn: $plugin.countdownEnabled)
+            SettingsToggleRow("Meeting join button", isOn: $plugin.meetingJoinEnabled)
 
             Divider()
 
-            Text("World Clock Zones").font(.headline)
-            Text("Comma-separated IANA time zone identifiers, e.g. America/New_York.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("World Clock Zones")
+            SettingsHelp("Comma-separated IANA time zone identifiers, e.g. America/New_York.")
             TextField("America/New_York, Europe/London", text: $zonesText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...4)
@@ -386,7 +384,7 @@ private struct TimeProdSettings: View {
 
             Divider()
 
-            Text("Countdown").font(.headline)
+            SettingsSectionHeader("Countdown")
             TextField("Label", text: $plugin.countdownLabel)
                 .textFieldStyle(.roundedBorder)
             DatePicker("Target date", selection: $plugin.countdownDate)
@@ -394,7 +392,7 @@ private struct TimeProdSettings: View {
 
             Divider()
 
-            Text("Access").font(.headline)
+            SettingsSectionHeader("Access")
             HStack {
                 Button("Grant Calendar access") {
                     Task { await plugin.requestCalendarAccess() }

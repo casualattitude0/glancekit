@@ -363,9 +363,17 @@ private struct BrowsingRow: View {
 struct BrowsingSettings: View {
     @Bindable var plugin: BrowsingPlugin
     @State private var newDomain: String = ""
-    /// Bumped after a permission request so the per-browser status rows re-read
-    /// TCC — `AutomationPermission.status` isn't observable.
-    @State private var permissionToken = 0
+    /// Live automation status per browser bundle id. `AutomationPermission.status`
+    /// isn't observable, and a grant can land from anywhere — the in-app button,
+    /// a prompt raised by background polling, or System Settings — so the rows
+    /// can't rely on their own button to know when to re-read. This snapshot is
+    /// refreshed on appear and on a slow timer while the pane is open; because
+    /// `Status` is Equatable, an unchanged re-read is a no-op for SwiftUI.
+    @State private var statuses: [String: GlancePermission.Status] = [:]
+
+    /// Fires while the settings pane is visible so `statuses` tracks grants that
+    /// happen outside this view.
+    private let statusPoll = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     /// Only offer browsers the user actually has installed, plus any already
     /// enabled (so a browser that was uninstalled can still be switched off).
@@ -374,55 +382,42 @@ struct BrowsingSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Browsers")
-                .font(.callout.weight(.semibold))
+        SettingsPage("Browsing") {
+            SettingsSectionHeader("Browsers")
 
             if availableBrowsers.isEmpty {
-                Text("No supported browsers found.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No supported browsers found.")
             } else {
                 ForEach(availableBrowsers) { browser in
                     browserRow(browser)
                 }
-                .id(permissionToken)
             }
 
-            Text("Only the browser you're currently looking at is read, and only while it's already running. Firefox is read from its own history file instead of by automation, so it needs no permission.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Only the browser you're currently looking at is read, and only while it's already running. Firefox is read from its own history file instead of by automation, so it needs no permission.")
 
             Divider()
 
             Stepper(value: $plugin.maxEntries, in: 25...500, step: 25) {
                 Text("Max history: \(plugin.maxEntries) pages")
             }
-            Text("Pinned pages are always kept and don't count toward this limit.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Pinned pages are always kept and don't count toward this limit.")
 
             Divider()
 
-            Toggle("Skip private and incognito windows", isOn: $plugin.skipsPrivateWindows)
-            Text("Reliable for Chrome and other Chromium browsers. Safari does not tell apps which of its windows are private, so private Safari tabs are still recorded — block the domain or pause recording instead.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow("Skip private and incognito windows", detail: "Reliable for Chrome and other Chromium browsers. Safari does not tell apps which of its windows are private, so private Safari tabs are still recorded — block the domain or pause recording instead.", isOn: $plugin.skipsPrivateWindows)
 
-            Toggle("Ignore query strings", isOn: $plugin.stripsQueryStrings)
-            Text("Drops everything after “?”, collapsing tracking-parameter variants into one entry. Leave off if you want search results and app URLs kept intact.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow("Ignore query strings", detail: "Drops everything after “?”, collapsing tracking-parameter variants into one entry. Leave off if you want search results and app URLs kept intact.", isOn: $plugin.stripsQueryStrings)
 
-            Toggle("Pause recording", isOn: $plugin.isPaused)
+            SettingsToggleRow("Pause recording", isOn: $plugin.isPaused)
             if let until = plugin.pausedUntil, until > Date() {
-                Text("Timed pause active until \(until.formatted(date: .omitted, time: .shortened)).")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Timed pause active until \(until.formatted(date: .omitted, time: .shortened)).")
             }
 
-            Toggle("Clear history when quitting", isOn: $plugin.clearOnQuit)
-            Text("On quit, removes unpinned pages. Pinned pages are kept.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow("Clear history when quitting", detail: "On quit, removes unpinned pages. Pinned pages are kept.", isOn: $plugin.clearOnQuit)
 
             Divider()
 
-            Text("Never record")
-                .font(.callout.weight(.semibold))
+            SettingsSectionHeader("Never record")
 
             HStack(spacing: 6) {
                 TextField("example.com", text: $newDomain)
@@ -433,8 +428,7 @@ struct BrowsingSettings: View {
             }
 
             if plugin.blockedDomains.isEmpty {
-                Text("No blocked domains. Adding one also deletes anything already recorded from it, including its subdomains.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No blocked domains. Adding one also deletes anything already recorded from it, including its subdomains.")
             } else {
                 ForEach(plugin.blockedDomains, id: \.self) { domain in
                     HStack {
@@ -450,8 +444,7 @@ struct BrowsingSettings: View {
                         .help("Remove")
                     }
                 }
-                Text("Subdomains are blocked too, so example.com also covers mail.example.com.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Subdomains are blocked too, so example.com also covers mail.example.com.")
             }
 
             Divider()
@@ -461,9 +454,20 @@ struct BrowsingSettings: View {
             } label: {
                 Label("Clear all history", systemImage: "trash")
             }
-            Text("Removes every page, including pinned ones.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Removes every page, including pinned ones.")
         }
+        .onAppear(perform: refreshStatuses)
+        .onReceive(statusPoll) { _ in refreshStatuses() }
+    }
+
+    /// Re-read TCC for every scriptable browser and publish the snapshot. Cheap,
+    /// synchronous, and a no-op for SwiftUI when nothing changed.
+    private func refreshStatuses() {
+        var next: [String: GlancePermission.Status] = [:]
+        for browser in availableBrowsers where browser.family != .firefox {
+            next[browser.bundleID] = AutomationPermission.status(for: browser.bundleID)
+        }
+        statuses = next
     }
 
     @ViewBuilder
@@ -472,6 +476,7 @@ struct BrowsingSettings: View {
             Toggle(isOn: binding(for: browser)) {
                 Label(browser.displayName, systemImage: browser.systemImage)
             }
+            .toggleStyle(.switch)
             Spacer()
             if plugin.enabledBrowsers.contains(browser), browser.family != .firefox {
                 permissionStatus(for: browser)
@@ -481,7 +486,7 @@ struct BrowsingSettings: View {
 
     @ViewBuilder
     private func permissionStatus(for browser: Browser) -> some View {
-        switch AutomationPermission.status(for: browser.bundleID) {
+        switch statuses[browser.bundleID] ?? AutomationPermission.status(for: browser.bundleID) {
         case .granted:
             Label("Allowed", systemImage: "checkmark.circle.fill")
                 .font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon)
@@ -498,7 +503,7 @@ struct BrowsingSettings: View {
             Button(browser.isRunning ? "Allow…" : "Not running") {
                 Task {
                     await AutomationPermission.request(for: browser.bundleID)
-                    permissionToken += 1
+                    refreshStatuses()
                 }
             }
             .controlSize(.small)

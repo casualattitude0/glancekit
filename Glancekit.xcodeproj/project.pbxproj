@@ -276,6 +276,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CODE_SIGN_ENTITLEMENTS = Glancekit/Glancekit.entitlements;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Glancekit;
@@ -288,7 +289,7 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Glancekit displays photos from your library as a slideshow glance.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Glancekit shows your reminders in the menu bar.";
-				MARKETING_VERSION = 1.1.3;
+				MARKETING_VERSION = 1.1.5;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -304,6 +305,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CODE_SIGN_ENTITLEMENTS = Glancekit/Glancekit.entitlements;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Glancekit;
@@ -316,7 +318,7 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Glancekit displays photos from your library as a slideshow glance.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Glancekit shows your reminders in the menu bar.";
-				MARKETING_VERSION = 1.1.3;
+				MARKETING_VERSION = 1.1.5;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -339,7 +341,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.1.3;
+				MARKETING_VERSION = 1.1.5;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit.GlancekitWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -366,7 +368,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.1.3;
+				MARKETING_VERSION = 1.1.5;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit.GlancekitWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";

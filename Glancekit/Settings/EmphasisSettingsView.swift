@@ -31,14 +31,7 @@ struct EmphasisSettingsView: View {
     private static let pinnedIDs: Set<String> = [PluginRegistry.assistantPluginID, "notes"]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Emphasis")
-                .font(.headline)
-
-            Text(intro)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage("Emphasis", intro: intro) {
             // The whole page only affects the Smart Panel; say so rather than
             // letting someone tune a column of controls that does nothing in the
             // layout they're actually using.
@@ -72,8 +65,6 @@ struct EmphasisSettingsView: View {
                     .buttonStyle(.link)
                     .disabled(!store.isCustomised)
             }
-
-            Spacer(minLength: 0)
         }
     }
 

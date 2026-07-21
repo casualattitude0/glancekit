@@ -352,7 +352,7 @@ private struct CurrencySettings: View {
     @State private var targetsText: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        SettingsPage("Base currency", intro: "Everything is quoted against this currency.") {
             baseSection
             Divider()
             targetsSection
@@ -371,19 +371,13 @@ private struct CurrencySettings: View {
     // MARK: Base
 
     private var baseSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Base currency")
-                .font(.headline)
-            Text("Everything is quoted against this currency.")
-                .font(.caption).foregroundStyle(.secondary)
-            Picker("Base currency", selection: baseBinding) {
-                ForEach(CurrencyCatalog.codes, id: \.self) { code in
-                    Text(CurrencyCatalog.label(for: code)).tag(code)
-                }
+        Picker("Base currency", selection: baseBinding) {
+            ForEach(CurrencyCatalog.codes, id: \.self) { code in
+                Text(CurrencyCatalog.label(for: code)).tag(code)
             }
-            .labelsHidden()
-            .frame(maxWidth: 320, alignment: .leading)
         }
+        .labelsHidden()
+        .frame(maxWidth: 320, alignment: .leading)
     }
 
     /// Routes selection through `setBase` so persistence, de-duping against the
@@ -403,8 +397,7 @@ private struct CurrencySettings: View {
 
     private var targetsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Target currencies")
-                .font(.headline)
+            SettingsSectionHeader("Target currencies")
 
             if plugin.targets.isEmpty {
                 Label("No target currencies yet. Add one below.", systemImage: "tray")
@@ -465,8 +458,7 @@ private struct CurrencySettings: View {
 
             if !addSearch.isEmpty {
                 if addMatches.isEmpty {
-                    Text("No matching currency.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    SettingsHelp("No matching currency.")
                 } else {
                     ForEach(addMatches, id: \.self) { code in
                         Button {
@@ -504,8 +496,7 @@ private struct CurrencySettings: View {
 
     private var converterSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Converter")
-                .font(.headline)
+            SettingsSectionHeader("Converter")
             HStack(spacing: 6) {
                 TextField("Amount", text: $amountText)
                     .textFieldStyle(.roundedBorder)
@@ -516,8 +507,7 @@ private struct CurrencySettings: View {
             }
 
             if plugin.rates.isEmpty {
-                Text("Rates load after the first refresh.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Rates load after the first refresh.")
             } else if let amount = parsedAmount {
                 ForEach(plugin.rates) { rate in
                     HStack {
@@ -531,8 +521,7 @@ private struct CurrencySettings: View {
                     .font(.callout)
                 }
             } else {
-                Text("Enter a number to convert.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Enter a number to convert.")
             }
         }
     }
@@ -548,13 +537,13 @@ private struct CurrencySettings: View {
     // MARK: Display
 
     private var displaySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Invert quotes (show 1 target = N base)", isOn: $plugin.invertDisplay)
-            Text(plugin.invertDisplay
-                 ? "Showing e.g. 1 EUR = 1.08 USD."
-                 : "Showing e.g. 1 USD = 0.92 EUR.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
+        SettingsToggleRow(
+            "Invert quotes (show 1 target = N base)",
+            detail: plugin.invertDisplay
+                ? "Showing e.g. 1 EUR = 1.08 USD."
+                : "Showing e.g. 1 USD = 0.92 EUR.",
+            isOn: $plugin.invertDisplay
+        )
     }
 
     // MARK: Power user
@@ -563,8 +552,7 @@ private struct CurrencySettings: View {
         VStack(alignment: .leading, spacing: 6) {
             DisclosureGroup("Edit as text (power user)", isExpanded: $showPowerUser) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Comma-separated ISO currency codes.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    SettingsHelp("Comma-separated ISO currency codes.")
                     TextField("EUR, JPY, GBP", text: $targetsText, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(2...4)

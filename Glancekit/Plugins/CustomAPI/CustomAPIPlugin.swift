@@ -134,16 +134,9 @@ private struct CustomAPISettings: View {
     @State private var editingID: UUID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Trackers")
-                .font(.headline)
-            Text("Turn any REST/JSON endpoint into a glance. Use a jsonPath like \"data.price\" or \"results[0].value\".")
-                .font(.caption).foregroundStyle(.secondary)
-
+        SettingsPage("Trackers", intro: "Turn any REST/JSON endpoint into a glance. Use a jsonPath like \"data.price\" or \"results[0].value\".") {
             if plugin.trackers.isEmpty {
-                Text("No trackers yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp("No trackers yet.")
             }
 
             ForEach($plugin.trackers) { $tracker in

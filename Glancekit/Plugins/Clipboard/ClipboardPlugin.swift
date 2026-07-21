@@ -750,30 +750,28 @@ private struct ClipboardSettings: View {
     @Bindable var plugin: ClipboardPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        SettingsPage("Clipboard") {
             Stepper(value: $plugin.maxEntries, in: 10...200, step: 10) {
                 Text("Max history: \(plugin.maxEntries) items")
             }
-            Text("Pinned items are always kept and don't count toward this limit.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Pinned items are always kept and don't count toward this limit.")
 
             Stepper(value: $plugin.previewLength, in: 40...1000, step: 20) {
                 Text("Preview length: \(plugin.previewLength) chars")
             }
-            Text("How much of each entry is shown in the list. Full text is always stored and copied.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("How much of each entry is shown in the list. Full text is always stored and copied.")
 
             Divider()
 
-            Toggle("Pause capturing", isOn: $plugin.isPaused)
+            SettingsToggleRow("Pause capturing", isOn: $plugin.isPaused)
             if let until = plugin.pausedUntil, until > Date() {
-                Text("Timed pause active until \(until.formatted(date: .omitted, time: .shortened)).")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Timed pause active until \(until.formatted(date: .omitted, time: .shortened)).")
             }
 
-            Toggle("Clear history when quitting", isOn: $plugin.clearOnQuit)
-            Text("On quit, removes unpinned items. Pinned items are kept.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow(
+                "Clear history when quitting",
+                detail: "On quit, removes unpinned items. Pinned items are kept.",
+                isOn: $plugin.clearOnQuit)
 
             Divider()
 
@@ -782,8 +780,7 @@ private struct ClipboardSettings: View {
             } label: {
                 Label("Clear all history", systemImage: "trash")
             }
-            Text("Removes every item, including pinned ones.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Removes every item, including pinned ones.")
         }
     }
 }

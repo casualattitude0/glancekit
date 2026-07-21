@@ -655,16 +655,13 @@ private struct WorldClockSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Clock display")
-                .font(.headline)
-            Toggle("Use 24-hour time", isOn: $plugin.use24Hour)
-            Toggle("Detailed rows (offset, difference, seconds)", isOn: $plugin.detailedView)
+        SettingsPage("Clock display") {
+            SettingsToggleRow("Use 24-hour time", isOn: $plugin.use24Hour)
+            SettingsToggleRow("Detailed rows (offset, difference, seconds)", isOn: $plugin.detailedView)
 
             Divider()
 
-            Text("Add a city")
-                .font(.headline)
+            SettingsSectionHeader("Add a city")
             TextField("Search time zones (e.g. Tokyo, Paris)…", text: $query)
                 .textFieldStyle(.roundedBorder)
             if !matches.isEmpty {
@@ -697,14 +694,11 @@ private struct WorldClockSettings: View {
 
             Divider()
 
-            Text("Your clocks")
-                .font(.headline)
-            Text("Drag to reorder. Rename a clock to give it a custom label. The home zone anchors the day markers.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("Your clocks")
+            SettingsHelp("Drag to reorder. Rename a clock to give it a custom label. The home zone anchors the day markers.")
 
             if plugin.zones.isEmpty {
-                Text("No cities added yet.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No cities added yet.")
             } else {
                 List {
                     ForEach(plugin.zones) { zone in

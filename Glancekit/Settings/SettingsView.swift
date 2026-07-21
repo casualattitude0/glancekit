@@ -63,11 +63,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+                .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
         } detail: {
             detail
         }
-        .frame(width: 620, height: 460)
+        // Wide enough that a paragraph of help text in a detail row wraps across
+        // a few comfortable lines rather than a crowded ~390pt gutter. With a
+        // 180pt sidebar this leaves the detail pane ~540pt.
+        .frame(width: 720, height: 480)
         // Settings has no Cancel button to bind ⎋ to, so nothing else claims it.
         // The shortcut recorder swallows ⎋ while recording via a local event
         // monitor, which runs before the responder chain — so cancelling a
@@ -215,9 +218,7 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Enable and reorder glances. Order controls the popover layout.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsHelp("Enable and reorder glances. Order controls the popover layout.")
 
             // Two groups rather than one mixed list: the enabled order is the
             // only one that shows up in the popover, so dragging is worth doing
@@ -280,19 +281,14 @@ struct SettingsView: View {
     /// The Smart Panel toggle: the app-wide choice between the dynamic feed and
     /// the classic side-by-side layout for the menu-bar panel.
     private var menuPanelRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: Binding(
+        SettingsToggleRow(
+            "Smart Panel",
+            detail: "Automatically surface the glances that need attention — high memory, a big market move, unread GitHub notifications, and more. Turn off to show every enabled glance in a row instead. The Assistant and Notes stay pinned either way.",
+            isOn: Binding(
                 get: { panelSettings.useSmartPanel },
                 set: { panelSettings.useSmartPanel = $0 }
-            )) {
-                Text("Smart Panel")
-            }
-            .toggleStyle(.switch)
-
-            Text("Automatically surface the glances that need attention — high memory, a big market move, unread GitHub notifications, and more. Turn off to show every enabled glance in a row instead. The Assistant and Notes stay pinned either way.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+            )
+        )
     }
 
     /// Checks GitHub Releases and downloads a newer build. The status text spells
