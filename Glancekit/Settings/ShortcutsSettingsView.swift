@@ -9,22 +9,14 @@ struct ShortcutsSettingsView: View {
     @Environment(PluginRegistry.self) private var registry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Global Shortcuts")
-                .font(.headline)
-
-            Text("These work anywhere in macOS, even when Glancekit isn't frontmost. Most open a glance in its own window at the mouse. Press the shortcut again — or click outside the window, or press Close — to dismiss it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage(
+            "Global Shortcuts",
+            intro: "These work anywhere in macOS, even when Glancekit isn't frontmost. Most open a glance in its own window at the mouse. Press the shortcut again — or click outside the window, or press Close — to dismiss it."
+        ) {
             ShortcutSectionGroup(title: "App", rows: appRows)
             ShortcutSectionGroup(title: "Glances", rows: glanceRows)
 
-            Text("Click a shortcut to record a new one; it needs at least one of ⌘, ⌥ or ⌃. Press ⎋ to cancel or ⌫ to clear.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Spacer(minLength: 0)
+            SettingsHelp("Click a shortcut to record a new one; it needs at least one of ⌘, ⌥ or ⌃. Press ⎋ to cancel or ⌫ to clear.")
         }
     }
 
@@ -70,26 +62,11 @@ private struct ShortcutSectionGroup: View {
     let rows: [ShortcutRowInfo]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 { Divider() }
-                    ShortcutRow(info: row)
-                }
+        SettingsCard(title) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { Divider() }
+                ShortcutRow(info: row)
             }
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(.quaternary)
-            )
         }
     }
 }

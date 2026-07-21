@@ -215,9 +215,7 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Enable and reorder glances. Order controls the popover layout.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsHelp("Enable and reorder glances. Order controls the popover layout.")
 
             // Two groups rather than one mixed list: the enabled order is the
             // only one that shows up in the popover, so dragging is worth doing
@@ -280,19 +278,14 @@ struct SettingsView: View {
     /// The Smart Panel toggle: the app-wide choice between the dynamic feed and
     /// the classic side-by-side layout for the menu-bar panel.
     private var menuPanelRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: Binding(
+        SettingsToggleRow(
+            "Smart Panel",
+            detail: "Automatically surface the glances that need attention — high memory, a big market move, unread GitHub notifications, and more. Turn off to show every enabled glance in a row instead. The Assistant and Notes stay pinned either way.",
+            isOn: Binding(
                 get: { panelSettings.useSmartPanel },
                 set: { panelSettings.useSmartPanel = $0 }
-            )) {
-                Text("Smart Panel")
-            }
-            .toggleStyle(.switch)
-
-            Text("Automatically surface the glances that need attention — high memory, a big market move, unread GitHub notifications, and more. Turn off to show every enabled glance in a row instead. The Assistant and Notes stay pinned either way.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+            )
+        )
     }
 
     /// Checks GitHub Releases and downloads a newer build. The status text spells
