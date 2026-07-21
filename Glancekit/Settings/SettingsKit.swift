@@ -171,32 +171,35 @@ struct SettingsRow<Control: View>: View {
     private var isFillingControl: Bool { controlAlignment != .trailing }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        // Title and control share the top line; a detail caption drops to its
+        // own line spanning the full row width — the way System Settings lays
+        // out a row with a subtitle. Keeping the caption out of the control's
+        // column is what gives it room to breathe instead of wrapping into a
+        // narrow gutter beside the switch.
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(title)
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            // The label column claims every point the control leaves — without
-            // this the intervening spacer wins the tug-of-war for slack width and
-            // the caption is crushed into a narrow gutter while empty space sits
-            // between it and the control.
-            .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            control
-                // A filling control (non-trailing) takes the whole column so
-                // wide controls align; a trailing control (switch, button) caps
-                // at the column but shrinks to its own width, returning the slack
-                // to the text so captions stop crowding into a narrow gutter.
-                .frame(
-                    minWidth: isFillingControl ? SettingsMetrics.controlColumn : nil,
-                    maxWidth: SettingsMetrics.controlColumn,
-                    alignment: controlAlignment
-                )
+                control
+                    // A filling control (non-trailing) takes the whole column so
+                    // wide controls align down the page; a trailing control
+                    // (switch, button) caps at the column but shrinks to its own
+                    // width and sits at the row's right edge.
+                    .frame(
+                        minWidth: isFillingControl ? SettingsMetrics.controlColumn : nil,
+                        maxWidth: SettingsMetrics.controlColumn,
+                        alignment: controlAlignment
+                    )
+            }
+
+            if let detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, SettingsMetrics.rowInsetH)
         .padding(.vertical, SettingsMetrics.rowInsetV)

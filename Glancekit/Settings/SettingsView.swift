@@ -63,11 +63,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+                .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
         } detail: {
             detail
         }
-        .frame(width: 620, height: 460)
+        // Wide enough that a paragraph of help text in a detail row wraps across
+        // a few comfortable lines rather than a crowded ~390pt gutter. With a
+        // 180pt sidebar this leaves the detail pane ~540pt.
+        .frame(width: 720, height: 480)
         // Settings has no Cancel button to bind ⎋ to, so nothing else claims it.
         // The shortcut recorder swallows ⎋ while recording via a local event
         // monitor, which runs before the responder chain — so cancelling a
