@@ -111,8 +111,9 @@ granted*. The popover automatically shows a grant prompt for them and reveals
 `popoverSection()` only once all are granted — you don't render the gate yourself.
 
 - Return `[]` when the permission isn't needed right now (e.g. Photos only needs
-  it in `.photosLibrary` mode; Time & Productivity only for enabled EventKit
-  features). See `PhotosPlugin`/`TimeProductivityPlugin` for worked examples.
+  it in `.photosLibrary` mode; Reminders/Next Meeting only once access is
+  actually required). See `PhotosPlugin`/`RemindersPlugin`/`NextMeetingPlugin`
+  for worked examples.
 - Each `GlancePermission` supplies live `status`, an async `request`, and a
   System Settings deep link for the denied case.
 - Network APIs (Stocks/GitHub/Custom API) are NOT system permissions — no gate.

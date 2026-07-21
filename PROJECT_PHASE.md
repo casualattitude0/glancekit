@@ -10,7 +10,7 @@ _Analysis date: 2026-07-17 · Type: APP (macOS menu bar, SwiftUI + WidgetKit)_
 | Evidence phase | Feature-complete / Alpha, released publicly anyway |
 | Confidence | High |
 | Momentum | Accelerating. Every commit in the visible history is dated 2026-07-17, with 8 files still dirty |
-| Stated vs revealed intent | README sells a platform ("fully extensible, with no limit on what gets added next"). The code is extensible by you, not by anyone else: 8 hardcoded `registry.register(...)` calls in `GlancekitApp.swift:22-29`, no dynamic discovery, no external bundle loading. `PLUGIN_CONTRACT.md` is addressed to AI sub-agents, not third-party developers |
+| Stated vs revealed intent | README sells a platform ("fully extensible, with no limit on what gets added next"). The code is extensible by you, not by anyone else: 8 hardcoded `registry.register(...)` calls in `GlancekitApp.swift:22-29`, no dynamic discovery, no external bundle loading. `docs/PLUGIN_CONTRACT.md` is addressed to AI sub-agents, not third-party developers |
 
 **Evidence for placement:**
 
