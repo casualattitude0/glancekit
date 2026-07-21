@@ -363,9 +363,17 @@ private struct BrowsingRow: View {
 struct BrowsingSettings: View {
     @Bindable var plugin: BrowsingPlugin
     @State private var newDomain: String = ""
-    /// Bumped after a permission request so the per-browser status rows re-read
-    /// TCC — `AutomationPermission.status` isn't observable.
-    @State private var permissionToken = 0
+    /// Live automation status per browser bundle id. `AutomationPermission.status`
+    /// isn't observable, and a grant can land from anywhere — the in-app button,
+    /// a prompt raised by background polling, or System Settings — so the rows
+    /// can't rely on their own button to know when to re-read. This snapshot is
+    /// refreshed on appear and on a slow timer while the pane is open; because
+    /// `Status` is Equatable, an unchanged re-read is a no-op for SwiftUI.
+    @State private var statuses: [String: GlancePermission.Status] = [:]
+
+    /// Fires while the settings pane is visible so `statuses` tracks grants that
+    /// happen outside this view.
+    private let statusPoll = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     /// Only offer browsers the user actually has installed, plus any already
     /// enabled (so a browser that was uninstalled can still be switched off).
@@ -385,7 +393,6 @@ struct BrowsingSettings: View {
                 ForEach(availableBrowsers) { browser in
                     browserRow(browser)
                 }
-                .id(permissionToken)
             }
 
             Text("Only the browser you're currently looking at is read, and only while it's already running. Firefox is read from its own history file instead of by automation, so it needs no permission.")
@@ -464,6 +471,18 @@ struct BrowsingSettings: View {
             Text("Removes every page, including pinned ones.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .onAppear(perform: refreshStatuses)
+        .onReceive(statusPoll) { _ in refreshStatuses() }
+    }
+
+    /// Re-read TCC for every scriptable browser and publish the snapshot. Cheap,
+    /// synchronous, and a no-op for SwiftUI when nothing changed.
+    private func refreshStatuses() {
+        var next: [String: GlancePermission.Status] = [:]
+        for browser in availableBrowsers where browser.family != .firefox {
+            next[browser.bundleID] = AutomationPermission.status(for: browser.bundleID)
+        }
+        statuses = next
     }
 
     @ViewBuilder
@@ -481,7 +500,7 @@ struct BrowsingSettings: View {
 
     @ViewBuilder
     private func permissionStatus(for browser: Browser) -> some View {
-        switch AutomationPermission.status(for: browser.bundleID) {
+        switch statuses[browser.bundleID] ?? AutomationPermission.status(for: browser.bundleID) {
         case .granted:
             Label("Allowed", systemImage: "checkmark.circle.fill")
                 .font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon)
@@ -498,7 +517,7 @@ struct BrowsingSettings: View {
             Button(browser.isRunning ? "Allow…" : "Not running") {
                 Task {
                     await AutomationPermission.request(for: browser.bundleID)
-                    permissionToken += 1
+                    refreshStatuses()
                 }
             }
             .controlSize(.small)
