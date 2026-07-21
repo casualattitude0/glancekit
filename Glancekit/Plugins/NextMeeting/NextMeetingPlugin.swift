@@ -7,11 +7,10 @@ import AppKit
 /// countdown ring, a one-click Join for detected meeting links, optional
 /// auto-open of the link just before start, and today's remaining agenda.
 ///
-/// This is a separate glance from Time & Productivity's single "Next Event"
-/// row — it owns its own EventKit feed (`NextMeetingFeed`) and never imports
-/// another plugin. All EventKit access is best-effort: denied/undetermined
+/// It owns its own EventKit feed (`NextMeetingFeed`) and never imports another
+/// plugin. All EventKit access is best-effort: denied/undetermined
 /// authorization never crashes `refresh()`, it just surfaces a grant prompt
-/// via `requiredPermissions` (see `PLUGIN_CONTRACT.md` rule 4).
+/// via `requiredPermissions` (see `docs/PLUGIN_CONTRACT.md` rule 4).
 @MainActor
 @Observable
 final class NextMeetingPlugin: GlancePlugin {

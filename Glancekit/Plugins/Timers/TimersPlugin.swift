@@ -4,10 +4,10 @@ import AppKit
 
 /// Timers glance: multiple concurrent countdown timers plus a stopwatch.
 ///
-/// Distinct from Pomodoro (fixed focus/break cycles) and Time & Productivity
-/// (a single target-date countdown). Here the user can run several independent
-/// countdowns at once, each with its own label and duration, alongside one
-/// free-running stopwatch.
+/// Distinct from Pomodoro (fixed focus/break cycles) and Countdowns
+/// (target-date milestones). Here the user can run several independent
+/// duration countdowns at once, each with its own label and duration, alongside
+/// one free-running stopwatch.
 ///
 /// - State (timers + stopwatch + prefs) is persisted to `UserDefaults` as
 ///   Codable JSON under `glancekit.timers.*`, storing each timer's `fireDate`
@@ -622,8 +622,8 @@ private struct TimersPopover: View {
     }
 }
 
-/// One timer row. A local `Timer.publish` (as in `Countdown.swift`) drives the
-/// live readout; the model remains the source of truth for `remaining`.
+/// One timer row. A local `Timer.publish` drives the live readout; the model
+/// remains the source of truth for `remaining`.
 private struct TimersRow: View {
     let plugin: TimersPlugin
     let item: TimerItem

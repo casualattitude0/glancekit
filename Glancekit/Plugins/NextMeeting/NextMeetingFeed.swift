@@ -4,9 +4,9 @@ import SwiftUI
 
 /// Lightweight snapshot of a calendar event used by the Next Meeting glance.
 ///
-/// Self-contained — this deliberately does NOT share any type with the
-/// Time & Productivity glance (no cross-plugin imports). The meeting-URL
-/// detection mirrors that glance's approach but is reimplemented here.
+/// Self-contained — this deliberately does NOT share any type with another
+/// glance (no cross-plugin imports); each EventKit-backed glance owns its own
+/// snapshot types and feed. See `docs/PLUGIN_CONTRACT.md`.
 struct NextMeetingEvent: Identifiable, Equatable {
     let id: String
     let title: String
