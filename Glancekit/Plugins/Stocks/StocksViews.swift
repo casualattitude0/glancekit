@@ -204,80 +204,15 @@ struct StocksQuoteRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(quote.name ?? quote.symbol)
-                    .font(.body.weight(.semibold))
-                    .lineLimit(1)
-                HStack(spacing: 3) {
-                    if showsMarketBadge {
-                        Text(quote.market.badge)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 3)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 2))
-                    }
-                    if quote.name != nil {
-                        Text(quote.symbol)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .frame(width: compact ? 74 : 96, alignment: .leading)
-
-            StocksSparkline(values: quote.series, up: quote.isUp, market: quote.market)
-                .frame(width: compact ? 48 : 72, height: 22)
-
-            Spacer(minLength: 4)
-
-            VStack(alignment: .trailing, spacing: 1) {
-                HStack(spacing: 4) {
-                    if let limit = limitState {
-                        Text(limit.label)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(limit.tint, in: RoundedRectangle(cornerRadius: 3))
-                    }
-
-                    // The flash fills the price cell the way a broker terminal
-                    // marks a print. Still confined to this one Text: the fill
-                    // is drawn as a background with negative padding, so it
-                    // bleeds past the glyphs without adding any layout of its
-                    // own and the row can't shift when it switches on.
-                    Text(StocksFormat.price(quote.price, market: quote.market))
-                        .font(.body.monospacedDigit())
-                        .contentTransition(.numericText())
-                        .foregroundStyle(priceTint)
-                        .background {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(tickTint ?? .clear)
-                                .opacity(blink ? 0.9 : 0)
-                                .padding(.horizontal, -4)
-                                .padding(.vertical, -1)
-                        }
-                }
-                Text(StocksFormat.changeLine(points: quote.change,
-                                             percent: quote.changePercent,
-                                             market: quote.market))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(quote.market.tint(rising: quote.isUp))
-                    .contentTransition(.numericText())
-                if let volume = quote.volume {
-                    Text(StocksFormat.volume(volume, unit: quote.volumeUnit))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .contentTransition(.numericText())
-                }
-            }
-            // Index levels run to five digits plus decimals, which wraps
-            // mid-number in the 240pt menu column — "42671.2" above a lone "7".
-            // Shrinking beats wrapping for a figure read at a glance.
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
+        // One row, two shapes. Given the width — the standalone tool window and
+        // Quick Switch — the whole row collapses onto a single line: identity,
+        // spark, price, change and volume side by side. Denied it — the 240pt
+        // menu column — it falls back to the stacked form, identity and price
+        // each over their own second line. `ViewThatFits` takes the first that
+        // fits, so the wide surfaces stop spending two lines per row on air.
+        ViewThatFits(in: .horizontal) {
+            singleLine
+            stacked
         }
         // Two layers, on the same clock. The whole row washes faintly so the
         // update is visible from across the panel without having to be looking
@@ -323,6 +258,150 @@ struct StocksQuoteRow: View {
             }
         }
         .onDisappear { fade?.cancel() }
+    }
+
+    // MARK: Row shapes
+
+    /// The wide shape: everything on one line. Widths are fixed on the right so
+    /// the price, change and volume columns line up down the list rather than
+    /// wandering with each number's length.
+    private var singleLine: some View {
+        HStack(spacing: 8) {
+            identityInline
+                .frame(width: 132, alignment: .leading)
+            sparkline
+            Spacer(minLength: 8)
+            limitBadge
+            priceText
+            changeText
+                .frame(width: 94, alignment: .trailing)
+            volumeText
+                .frame(width: 86, alignment: .trailing)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+
+    /// The narrow shape: identity over its ticker, price over its volume — the
+    /// original menu-column layout, kept for the 240pt popover.
+    private var stacked: some View {
+        HStack(spacing: 8) {
+            identityStacked
+                .frame(width: compact ? 74 : 96, alignment: .leading)
+            sparkline
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 1) {
+                HStack(spacing: 5) {
+                    limitBadge
+                    priceText
+                    changeText
+                }
+                volumeText
+            }
+            // Index levels run to five digits plus decimals, which wraps
+            // mid-number in the 240pt menu column — "42671.2" above a lone "7".
+            // Shrinking beats wrapping for a figure read at a glance.
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+        }
+    }
+
+    // MARK: Shared pieces
+
+    /// Name and ticker on one line, for the wide shape.
+    private var identityInline: some View {
+        HStack(spacing: 4) {
+            Text(quote.name ?? quote.symbol)
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+            marketBadge
+            if quote.name != nil {
+                Text(quote.symbol)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    /// Name over ticker, for the narrow shape.
+    private var identityStacked: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(quote.name ?? quote.symbol)
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+            HStack(spacing: 3) {
+                marketBadge
+                if quote.name != nil {
+                    Text(quote.symbol)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var marketBadge: some View {
+        if showsMarketBadge {
+            Text(quote.market.badge)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 3)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 2))
+        }
+    }
+
+    private var sparkline: some View {
+        StocksSparkline(values: quote.series, up: quote.isUp, market: quote.market)
+            .frame(width: compact ? 48 : 72, height: 22)
+    }
+
+    @ViewBuilder private var limitBadge: some View {
+        if let limit = limitState {
+            Text(limit.label)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(limit.tint, in: RoundedRectangle(cornerRadius: 3))
+        }
+    }
+
+    /// The flash fills the price cell the way a broker terminal marks a print.
+    /// Confined to this one Text: the fill is drawn as a background with negative
+    /// padding, so it bleeds past the glyphs without adding any layout of its own
+    /// and the row can't shift when it switches on.
+    private var priceText: some View {
+        Text(StocksFormat.price(quote.price, market: quote.market))
+            .font(.body.monospacedDigit())
+            .contentTransition(.numericText())
+            .foregroundStyle(priceTint)
+            .background {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(tickTint ?? .clear)
+                    .opacity(blink ? 0.9 : 0)
+                    .padding(.horizontal, -4)
+                    .padding(.vertical, -1)
+            }
+    }
+
+    private var changeText: some View {
+        Text(StocksFormat.changeLine(points: quote.change,
+                                     percent: quote.changePercent,
+                                     market: quote.market))
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(quote.market.tint(rising: quote.isUp))
+            .contentTransition(.numericText())
+    }
+
+    @ViewBuilder private var volumeText: some View {
+        if let volume = quote.volume {
+            Text(StocksFormat.volume(volume, unit: quote.volumeUnit))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .contentTransition(.numericText())
+        }
     }
 }
 
@@ -559,23 +638,30 @@ struct StocksPlanBoard: View {
     }
 
     /// Every stock stacked, the selected one expanded inline — the narrow shape.
+    ///
+    /// Only the expanded stock unrolls its full ladder and prose. Drawing every
+    /// stock's five-rung ladder at once was the single tallest thing in the menu
+    /// column — four or five ladders' worth of height the eye scrolls straight
+    /// past. Collapsed rows fall back to a one-line summary of the nearest live
+    /// level, so nothing about to fire is hidden by the fold; the ladder is one
+    /// tap away for the stock you're actually reading.
     private var singleColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(plan?.plans ?? [], id: \.stockId) { stock in
                 let rows = engine.statuses[stock.stockId] ?? []
+                let isExpanded = selection == stock.stockId
                 VStack(alignment: .leading, spacing: 4) {
                     Button {
-                        selection = (selection == stock.stockId) ? nil : stock.stockId
+                        selection = isExpanded ? nil : stock.stockId
                     } label: {
                         StocksStockHeader(stock: stock, quote: quote(for: stock),
-                                          isExpanded: selection == stock.stockId)
+                                          isExpanded: isExpanded)
                     }
                     .buttonStyle(.plain)
 
-                    StocksLevelLadder(rows: rows, price: quote(for: stock)?.price,
-                                      market: stock.symbol?.market ?? .tw)
-
-                    if selection == stock.stockId {
+                    if isExpanded {
+                        StocksLevelLadder(rows: rows, price: quote(for: stock)?.price,
+                                          market: stock.symbol?.market ?? .tw)
                         StocksStockDetail(
                             stock: stock,
                             rows: rows,
@@ -584,6 +670,8 @@ struct StocksPlanBoard: View {
                             showsLadder: false
                         )
                         .padding(.top, 2)
+                    } else {
+                        StocksPlanRowSummary(rows: rows, quote: quote(for: stock))
                     }
                 }
             }
@@ -744,37 +832,79 @@ private struct StocksHoldingRow: View {
     private var market: Market { position.market }
 
     var body: some View {
+        // Same two-shape trick as the quote rows: one line where there's width,
+        // the cost basis tucked between name and value; the stacked form only in
+        // the narrow menu column.
+        ViewThatFits(in: .horizontal) {
+            singleLine
+            stacked
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+    }
+
+    private var singleLine: some View {
+        HStack(spacing: 8) {
+            name
+            costBasis
+            Spacer(minLength: 8)
+            if let priced {
+                Text(priced.value).font(.caption.monospacedDigit())
+                Text(priced.profit)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(market.tint(rising: priced.gain))
+            } else {
+                Text("—").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var stacked: some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(position.displayName).font(.caption.weight(.semibold))
-                    if !isPlanned {
-                        Image(systemName: "shield.slash")
-                            .font(.system(size: 8)).foregroundStyle(.orange)
-                    }
-                }
-                Text("\(Int(position.shares)) sh @ \(StocksFormat.price(position.avgCost, market: market))")
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                name
+                costBasis
             }
             Spacer(minLength: 4)
-            if let quote {
-                let pl = position.profit(at: quote.price)
+            if let priced {
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(StocksFormat.money(position.marketValue(at: quote.price), market: market))
-                        .font(.caption.monospacedDigit())
-                    Text("\(pl >= 0 ? "+" : "−")\(StocksFormat.money(abs(pl), market: market))  "
-                         + StocksFormat.signedPercent(position.profitPercent(at: quote.price)))
+                    Text(priced.value).font(.caption.monospacedDigit())
+                    Text(priced.profit)
                         .font(.caption2.monospacedDigit())
                         // A gain is red in Taipei and Tokyo, green in New York —
                         // the same convention the price rows use.
-                        .foregroundStyle(market.tint(rising: pl >= 0))
+                        .foregroundStyle(market.tint(rising: priced.gain))
                 }
             } else {
                 Text("—").font(.caption2).foregroundStyle(.tertiary)
             }
         }
-        .lineLimit(1)
-        .minimumScaleFactor(0.75)
+    }
+
+    private var name: some View {
+        HStack(spacing: 4) {
+            Text(position.displayName).font(.caption.weight(.semibold))
+            if !isPlanned {
+                Image(systemName: "shield.slash")
+                    .font(.system(size: 8)).foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var costBasis: some View {
+        Text("\(Int(position.shares)) sh @ \(StocksFormat.price(position.avgCost, market: market))")
+            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+    }
+
+    /// The value and profit strings, computed once so both shapes read the same
+    /// numbers and colour. Nil when the position hasn't been quoted yet.
+    private var priced: (value: String, profit: String, gain: Bool)? {
+        guard let quote else { return nil }
+        let pl = position.profit(at: quote.price)
+        return (StocksFormat.money(position.marketValue(at: quote.price), market: market),
+                "\(pl >= 0 ? "+" : "−")\(StocksFormat.money(abs(pl), market: market))  "
+                    + StocksFormat.signedPercent(position.profitPercent(at: quote.price)),
+                pl >= 0)
     }
 }
 
@@ -1275,6 +1405,55 @@ struct StocksStockHeader: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// The one-line stand-in a collapsed plan row shows in the narrow column: the
+/// nearest live level, its price, and how far off it is. Enough to tell whether
+/// this stock is about to do anything without unrolling its whole ladder — the
+/// same "nearest live level" the two-pane list row leans on, so the two shapes
+/// stay in agreement about what matters right now.
+struct StocksPlanRowSummary: View {
+    let rows: [LevelStatus]
+    let quote: StockQuote?
+
+    private var nearest: LevelStatus? {
+        rows.filter { !$0.isAdvisoryOnly && !$0.hasFired && $0.distancePercent != nil }
+            .min { abs($0.distancePercent!) < abs($1.distancePercent!) }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let nearest {
+                let distance = nearest.distancePercent ?? 0
+                Capsule()
+                    .fill(StocksFormat.tint(for: nearest.kind))
+                    .frame(width: 3, height: 11)
+                Text(StocksFormat.levelLabel(nearest.kind))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(StocksFormat.tint(for: nearest.kind))
+                if let line = nearest.line {
+                    Text(StocksFormat.price(line, market: quote?.market ?? .tw))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                // Amber once within a percent — the same threshold that turns
+                // the list row's distance orange, so "close enough to watch"
+                // reads the same wherever it appears.
+                Text(StocksFormat.signedPercent(distance) + " away")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(abs(distance) <= 1 ? AnyShapeStyle(Color.orange)
+                                                        : AnyShapeStyle(.tertiary))
+            } else {
+                Text("No live level").font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        // Indented to sit under the header's name rather than its chevron, so a
+        // collapsed row reads as one unit and the summary hangs off the stock.
+        .padding(.leading, 16)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
     }
 }
 

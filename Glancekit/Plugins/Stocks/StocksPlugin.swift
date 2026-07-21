@@ -65,6 +65,12 @@ final class StocksPlugin: GlancePlugin {
     /// having it reset on each switch would be its own small annoyance.
     var selectedPlanStockID: String?
 
+    /// Which of the three sections is on screen. On the plugin for the same
+    /// reason as `selectedPlanStockID`: the popover, tool window and Quick
+    /// Switch all render the same view, and a tab that reset every time you
+    /// moved between them would be a small daily irritation.
+    var selectedSection: StocksSection = .prices
+
     /// Persisted watchlist.
     var symbols: [String] {
         didSet { UserDefaults.standard.set(symbols, forKey: watchlistKey) }
@@ -462,6 +468,23 @@ final class StocksPlugin: GlancePlugin {
 
 // MARK: - Popover UI
 
+/// The three sections the glance is split across. Tabs rather than one long
+/// column: the watchlist, the portfolio and the trading plan are each a full
+/// screen's worth on their own, and stacking all three is what made the glance
+/// scroll. One is on screen at a time, chosen by the segmented control up top.
+enum StocksSection: String, CaseIterable, Identifiable {
+    case prices, holdings, plan
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .prices: return "Prices"
+        case .holdings: return "Holdings"
+        case .plan: return "Plan"
+        }
+    }
+}
+
 /// The glance's single rendering surface, shown in the 240pt menu column, the
 /// standalone tool window, and Quick Switch alike. The plan board inside it
 /// picks its own shape via `ViewThatFits` — see `StocksViews.swift`.
@@ -469,7 +492,10 @@ private struct StocksPopover: View {
     @Bindable var plugin: StocksPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Errors sit above the tabs, not inside one: a dead feed or an
+            // unreadable plan file is worth seeing whichever section you're on,
+            // and burying it under the wrong tab is how it goes unnoticed.
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -483,6 +509,25 @@ private struct StocksPopover: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Picker("Section", selection: $plugin.selectedSection) {
+                ForEach(StocksSection.allCases) { section in
+                    Text(section.title).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch plugin.selectedSection {
+            case .prices:   pricesTab
+            case .holdings: holdingsTab
+            case .plan:     planTab
+            }
+        }
+    }
+
+    /// The watchlist, with the per-market feed heartbeat beneath it.
+    private var pricesTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if plugin.quotes.isEmpty {
                 Text("No quotes yet\u{2026}")
                     .font(.caption)
@@ -509,23 +554,23 @@ private struct StocksPopover: View {
                                      quotedAt: plugin.quotedAt(for: market))
                 }
             }
-
-            Divider()
-
-            StocksHoldingsSection(
-                source: plugin.holdingsSource,
-                quotes: plugin.quotesByKey,
-                plannedIDs: Set(plugin.planSource.plan?.plans.map(\.stockId) ?? []))
-
-            Divider()
-
-            // Always shown, even with no plan loaded: the import control lives
-            // here, so a plan has to be reachable from the glance itself.
-            StocksPlanBoard(source: plugin.planSource,
-                            engine: plugin.engine,
-                            quotes: plugin.quotesByKey,
-                            selection: $plugin.selectedPlanStockID)
         }
+    }
+
+    private var holdingsTab: some View {
+        StocksHoldingsSection(
+            source: plugin.holdingsSource,
+            quotes: plugin.quotesByKey,
+            plannedIDs: Set(plugin.planSource.plan?.plans.map(\.stockId) ?? []))
+    }
+
+    /// Always available, even with no plan loaded: the import control lives
+    /// inside it, so a plan has to be reachable from the glance itself.
+    private var planTab: some View {
+        StocksPlanBoard(source: plugin.planSource,
+                        engine: plugin.engine,
+                        quotes: plugin.quotesByKey,
+                        selection: $plugin.selectedPlanStockID)
     }
 }
 
