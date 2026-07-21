@@ -82,16 +82,26 @@ fi
 # `codesign --force --sign -` DROPS entitlements unless --entitlements is passed.
 # The appex must keep com.apple.security.app-sandbox: pkd silently refuses to
 # register an unsandboxed widget extension, so the gallery shows no Glancekit
-# widgets at all. Sign inner-to-outer; only the widget target has entitlements.
+# widgets at all. The main app must keep com.apple.security.automation.apple-events
+# or the hardened runtime blocks the Apple Events that read browser tabs — TCC
+# never even shows a consent prompt. Sign inner-to-outer, each with its own
+# entitlements.
 echo "▸ Ad-hoc re-signing (ditto can invalidate the signature) …"
 codesign --force --sign - \
   --entitlements "$PROJECT_DIR/GlancekitWidgets/GlancekitWidgets.entitlements" \
   "$DEST/Contents/PlugIns/GlancekitWidgets.appex"
-codesign --force --sign - "$DEST"
+codesign --force --sign - \
+  --entitlements "$PROJECT_DIR/Glancekit/Glancekit.entitlements" \
+  "$DEST"
 
 if ! codesign -d --entitlements :- "$DEST/Contents/PlugIns/GlancekitWidgets.appex" 2>/dev/null \
      | grep -q 'com.apple.security.app-sandbox'; then
   echo "✗ appex lost its app-sandbox entitlement — pkd would reject it." >&2; exit 1
+fi
+
+if ! codesign -d --entitlements :- "$DEST" 2>/dev/null \
+     | grep -q 'com.apple.security.automation.apple-events'; then
+  echo "✗ app lost its apple-events entitlement — browser tab reads would be blocked." >&2; exit 1
 fi
 
 echo "▸ Re-registering with LaunchServices …"
