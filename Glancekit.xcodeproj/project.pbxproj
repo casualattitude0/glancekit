@@ -289,7 +289,7 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Glancekit displays photos from your library as a slideshow glance.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Glancekit shows your reminders in the menu bar.";
-				MARKETING_VERSION = 1.1.5;
+				MARKETING_VERSION = 1.1.6;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -318,7 +318,7 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Glancekit displays photos from your library as a slideshow glance.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Glancekit shows your reminders in the menu bar.";
-				MARKETING_VERSION = 1.1.5;
+				MARKETING_VERSION = 1.1.6;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -341,7 +341,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.1.5;
+				MARKETING_VERSION = 1.1.6;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit.GlancekitWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -368,7 +368,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.1.5;
+				MARKETING_VERSION = 1.1.6;
 				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.glancekit.Glancekit.GlancekitWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
