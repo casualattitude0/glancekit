@@ -158,8 +158,7 @@ final class WorldClockPlugin: GlancePlugin {
     /// City label derived from the last path component of an IANA identifier,
     /// with underscores turned into spaces (e.g. "America/New_York" → "New York").
     nonisolated static func cityLabel(for identifier: String) -> String {
-        let comps = identifier.split(separator: "/")
-        return comps.last.map { $0.replacingOccurrences(of: "_", with: " ") } ?? identifier
+        TimeZoneLabel.city(for: identifier)
     }
 
     /// Compact time string for the signal/headline.
@@ -174,13 +173,7 @@ final class WorldClockPlugin: GlancePlugin {
     /// GMT offset label, e.g. "GMT+9" or "GMT+5:30", computed for `date` so DST
     /// is reflected.
     nonisolated static func offsetLabel(for identifier: String, at date: Date) -> String {
-        let tz = TimeZone(identifier: identifier) ?? .current
-        let seconds = tz.secondsFromGMT(for: date)
-        let hours = seconds / 3600
-        let minutes = abs(seconds / 60) % 60
-        return minutes == 0
-            ? String(format: "GMT%+d", hours)
-            : String(format: "GMT%+d:%02d", hours, minutes)
+        TimeZoneLabel.gmtOffset(for: identifier, at: date)
     }
 
     /// Hour(-and-minute) difference of a zone relative to home, computed at
