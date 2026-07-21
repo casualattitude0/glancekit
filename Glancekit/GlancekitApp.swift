@@ -29,7 +29,8 @@ struct GlancekitApp: App {
         // the user's own order, once set, overrides it.
         registry.register(StocksPlugin())
         registry.register(SystemStatsPlugin())
-        registry.register(TimeProductivityPlugin())
+        registry.register(RemindersPlugin())
+        registry.register(CountdownsPlugin())
         registry.register(PomodoroPlugin())
         registry.register(PhotosPlugin())
         registry.register(GitHubPlugin())

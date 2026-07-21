@@ -1,5 +1,25 @@
 # Glancekit — project rules
 
+## Releasing: a tag without assets is not a release
+
+Every GitHub release **must** carry both `Glancekit-<version>.dmg` and
+`Glancekit-<version>.zip`. `scripts/install-release.sh` and every "download the
+app" link resolve those assets — a tag without them ships a release nobody can
+install. This has been missed before.
+
+Do **not** hand-build the assets. After the version is bumped and the release
+tag exists, run:
+
+```sh
+scripts/release.sh          # version from MARKETING_VERSION; or: scripts/release.sh 1.1.6
+```
+
+It builds the same standalone, ad-hoc-signed app `scripts/install.sh` does
+(`ENABLE_DEBUG_DYLIB=NO`, entitlements preserved), verifies the signature /
+entitlements / bundle version, packages the `.dmg` + `.zip`, and uploads them to
+the `v<version>` release (`--clobber`, so re-runs are safe). It refuses if the
+bundle version doesn't match or the release tag doesn't exist yet.
+
 ## Never build into the default DerivedData
 
 Always pass an explicit build location outside the Spotlight index:

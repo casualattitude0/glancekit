@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The JSON editing surface: a monospaced field with a fold gutter, depth-tinted
-// brackets, indent guides, and ⇥ / ⇧⇥ bound to format / minify.
+// The JSON editing surface: a monospaced field with an in-margin fold gutter,
+// depth-tinted brackets, indent guides, and ⇥ / ⇧⇥ bound to format / minify.
 //
 // It's a separate `NSViewRepresentable` from `MarkdownEditor` rather than
 // another flag on it, because the two need different TextKit stacks:
@@ -19,6 +19,23 @@ import AppKit
 // stays intact while folded. Nothing can save a placeholder to disk, the find
 // bar still searches inside collapsed blocks, and undo never sees a fold. A
 // fold is purely how the text is *drawn*.
+//
+// ── Rewrite notes (what this version fixes) ──────────────────────────────────
+//
+// The old version drove the fold gutter with an `NSRulerView`, which drew its
+// controls *outside* the scroll view's clip and into the neighbouring SwiftUI
+// views — the stray ⊟ marks below the field, and the "saved list keeps
+// flickering" that came from the ruler re-invalidating on every keystroke.
+// The gutter now lives *inside* the text view's own left inset, in the same
+// coordinate space as the indent guides, so it can only ever draw where the
+// text draws and scrolls/clips for free.
+//
+// The old version also re-lexed and re-`setAttributes`'d the *entire* document
+// on every `textDidChange`, every `textViewDidChangeSelection`, and again inside
+// `updateNSView` — three full passes per keystroke, which stomped on IME marked
+// text (CJK composition) and thrashed layout. Now there is one highlight pass
+// per actual edit, selection changes only re-tint the caret's bracket pair, and
+// nothing touches the storage while marked text is being composed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A handle on the editor's folding, for controls that live outside the text
@@ -47,12 +64,10 @@ struct JSONEditor: NSViewRepresentable {
     /// Set true to request first-responder; the view resets it to false.
     @Binding var wantsFocus: Bool
     var fontSize: CGFloat = 13
+    /// Spaces per indent level. ⇥ inserts this many; ⇧⇥ removes them.
+    var indentWidth: Int = 2
     /// Fires when ⌘↩ is pressed — the popover saves the note.
     var onCommandReturn: () -> Void = {}
-    /// ⇥ / ⇧⇥. Return true to claim the key; false lets a literal tab through,
-    /// which is what half-typed JSON wants.
-    var onTab: () -> Bool = { false }
-    var onBacktab: () -> Bool = { false }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -72,6 +87,10 @@ struct JSONEditor: NSViewRepresentable {
         let container = NSTextContainer(
             size: NSSize(width: contentSize.width, height: bigDimension))
         container.widthTracksTextView = true
+        // Drop AppKit's default 5pt line-fragment padding so the text origin is
+        // exactly `textContainerInset.width` — the placeholder overlay and the
+        // fold-gutter geometry both assume the first glyph lands at `gutterWidth`.
+        container.lineFragmentPadding = 0
         layoutManager.addTextContainer(container)
 
         let textView = FoldingTextView(
@@ -86,8 +105,7 @@ struct JSONEditor: NSViewRepresentable {
         layoutManager.delegate = textView
 
         textView.onCommandReturn = { context.coordinator.parent.onCommandReturn() }
-        textView.onTab = { context.coordinator.parent.onTab() }
-        textView.onBacktab = { context.coordinator.parent.onBacktab() }
+        textView.indentWidth = indentWidth
 
         textView.isRichText = false
         textView.allowsUndo = true
@@ -100,7 +118,9 @@ struct JSONEditor: NSViewRepresentable {
         textView.isContinuousSpellCheckingEnabled = false
         textView.usesFindBar = true
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 6, height: 8)
+        // The left inset is the fold gutter's home. Text starts after it; the
+        // fold controls are drawn into it (see `FoldingTextView.gutterWidth`).
+        textView.textContainerInset = NSSize(width: FoldingTextView.gutterWidth, height: 8)
         textView.fontSize = fontSize
         textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         textView.typingAttributes = [
@@ -111,16 +131,9 @@ struct JSONEditor: NSViewRepresentable {
         textView.string = text
         scrollView.documentView = textView
 
-        // The fold gutter lives in the scroll view's vertical ruler slot, so it
-        // scrolls with the text for free.
-        let gutter = JSONGutterView(scrollView: scrollView, textView: textView)
-        scrollView.verticalRulerView = gutter
-        scrollView.hasVerticalRuler = true
-        scrollView.rulersVisible = true
-        textView.gutter = gutter
         foldController?.textView = textView
 
-        textView.refreshStructure()
+        textView.relex()
         return scrollView
     }
 
@@ -128,27 +141,40 @@ struct JSONEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? FoldingTextView else { return }
 
         context.coordinator.parent = self
+        textView.indentWidth = indentWidth
 
+        // Only touch the storage when the text genuinely came from *outside* the
+        // view (a ⇥ reformat, an edit from elsewhere). During plain typing the
+        // strings already match, so this whole block is skipped — which is what
+        // keeps typing from thrashing layout and flickering the sibling views.
         if textView.string != text {
             let selected = textView.selectedRange()
             let whole = NSRange(location: 0, length: (textView.string as NSString).length)
             // Replace *through* the text view rather than assigning `.string`,
             // so the swap joins the undo stack: ⌘Z after a ⇥ reformat puts back
-            // exactly what you pasted. It also runs the delegate's fold
-            // bookkeeping, which drops folds the new text has invalidated.
+            // exactly what you pasted. `didChangeText()` then routes back through
+            // the delegate's `textDidChange`, which re-lexes once.
             if textView.shouldChangeText(in: whole, replacementString: text) {
                 textView.textStorage?.replaceCharacters(in: whole, with: text)
                 textView.didChangeText()
             } else {
                 textView.string = text
                 textView.clearFolds()
+                textView.relex()
             }
             textView.setSelectedRange(NSRange(
                 location: min(selected.location, (text as NSString).length), length: 0))
         }
 
-        textView.fontSize = fontSize
-        textView.refreshStructure()
+        if textView.fontSize != fontSize {
+            textView.fontSize = fontSize
+            textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            textView.typingAttributes = [
+                .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
+                .foregroundColor: NSColor.labelColor,
+            ]
+            textView.relex()
+        }
 
         if wantsFocus {
             // Defer: the window may not be key yet on the same runloop turn the
@@ -168,18 +194,18 @@ struct JSONEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? FoldingTextView else { return }
-            // `updateNSView` also routes its writes through `didChangeText` (to
-            // keep undo working), which lands back here. Writing the binding
-            // again from inside a view update is what SwiftUI complains about,
-            // so only publish a value that actually differs.
+            // `updateNSView` also routes its writes through `didChangeText`, which
+            // lands here. Writing the binding again from inside a view update is
+            // what SwiftUI complains about, so only publish a value that differs.
             if parent.text != textView.string { parent.text = textView.string }
-            textView.refreshStructure()
+            textView.relex()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            // The matched-bracket emphasis follows the caret.
+            // The matched-bracket emphasis follows the caret — a cheap re-tint,
+            // not a re-lex.
             guard let textView = notification.object as? FoldingTextView else { return }
-            textView.refreshStructure()
+            textView.refreshEmphasis()
         }
 
         /// Fold bookkeeping runs here, *before* the edit lands, because this is
@@ -199,7 +225,8 @@ struct JSONEditor: NSViewRepresentable {
 
 // MARK: - The text view
 
-/// An `NSTextView` that can hide ranges of its own text without deleting them.
+/// An `NSTextView` that can hide ranges of its own text without deleting them,
+/// and draws its own fold gutter into its left inset.
 ///
 /// Hiding happens in the layout manager's glyph-generation callback: characters
 /// inside a folded range get the `.null` glyph property (drawn as nothing, zero
@@ -210,16 +237,22 @@ struct JSONEditor: NSViewRepresentable {
 /// character it replaces, so nothing shifts.
 final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
     var onCommandReturn: (() -> Void)?
-    /// Return true to swallow the key; false to fall through to the text view.
-    var onTab: (() -> Bool)?
-    var onBacktab: (() -> Bool)?
 
     var fontSize: CGFloat = 13
-    weak var gutter: JSONGutterView?
+    /// Spaces per indent level for ⇥ / ⇧⇥.
+    var indentWidth: Int = 2
+    private var indentString: String { String(repeating: " ", count: max(1, indentWidth)) }
+
+    /// Width of the left inset reserved for the fold gutter. Text begins after
+    /// it; fold controls are drawn inside it.
+    static let gutterWidth: CGFloat = 22
+    /// The fold control (a rounded square) and where it sits in the gutter.
+    private static let foldBoxSide: CGFloat = 9
+    private static let foldBoxX: CGFloat = 4
 
     /// Interiors currently hidden, in document order, non-overlapping.
     private(set) var folds: [NSRange] = []
-    /// The bracket structure of the current text — recomputed on every edit and
+    /// The bracket structure of the current text — recomputed on each edit and
     /// shared by the highlighter, the gutter, and the indent guides.
     private(set) var blocks: [JSONBlock] = []
 
@@ -228,25 +261,76 @@ final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
     /// Merged hidden ranges, so nested folds are one run rather than several.
     private var hiddenRuns: [NSRange] = []
 
-    // MARK: Structure
+    /// The bracket-pair ranges currently wearing the caret emphasis, so a later
+    /// selection change can clear exactly them without a full repaint.
+    private var emphasizedRanges: [NSRange] = []
 
-    /// Re-lexes the document, repaints it, and refreshes the gutter. Cheap
-    /// enough for a note-sized payload on every keystroke; if a pasted blob ever
-    /// makes it feel heavy, this is the single place to add a coalescing timer.
-    func refreshStructure() {
+    /// Where each fold control was last drawn, so a click maps back to its block
+    /// without recomputing layout.
+    private var foldHitTargets: [(rect: NSRect, block: JSONBlock)] = []
+
+    // MARK: Structure & colour
+
+    /// Re-lexes the document and repaints it. Cheap enough for a note-sized
+    /// payload on every keystroke; if a pasted blob ever makes it feel heavy,
+    /// this is the single place to add a coalescing timer.
+    ///
+    /// Held off entirely while an input method is composing marked text — a
+    /// `setAttributes` over the whole storage mid-composition tears the IME's
+    /// underline off, which is exactly what made CJK typing miserable. The next
+    /// edit after the composition commits re-lexes as normal.
+    func relex() {
+        guard !hasMarkedText() else { return }
         blocks = jsonBlocks(in: string)
         guard let storage = textStorage else { return }
-
-        let caret = selectedRange().length == 0 ? selectedRange().location : NSNotFound
-        let pair = caret == NSNotFound ? nil : jsonBracketPair(forCaretAt: caret, in: blocks)
 
         applyJSONHighlight(
             to: storage,
             theme: .standard(pointSize: fontSize),
             blocks: blocks,
-            emphasized: pair)
+            emphasized: nil)
+        // The full pass reset every background, so the record of what was
+        // emphasised is stale; re-derive it from the caret.
+        emphasizedRanges = []
+        applyEmphasis(currentBracketPair())
 
-        gutter?.needsDisplay = true
+        needsDisplay = true
+    }
+
+    /// Re-tints just the bracket pair the caret sits on. No re-lex, no full
+    /// attribute pass — safe to run on every selection change.
+    func refreshEmphasis() {
+        guard !hasMarkedText() else { return }
+        applyEmphasis(currentBracketPair())
+    }
+
+    /// The bracket pair to emphasise for the current caret, or nil when there's
+    /// a selection (emphasis only makes sense for a point).
+    private func currentBracketPair() -> JSONBlock? {
+        let selection = selectedRange()
+        guard selection.length == 0 else { return nil }
+        return jsonBracketPair(forCaretAt: selection.location, in: blocks)
+    }
+
+    /// Swaps the emphasis background from wherever it was to `pair`'s brackets.
+    private func applyEmphasis(_ pair: JSONBlock?) {
+        guard let storage = textStorage else { return }
+        let length = storage.length
+
+        for range in emphasizedRanges where NSMaxRange(range) <= length {
+            storage.removeAttribute(.backgroundColor, range: range)
+        }
+        emphasizedRanges = []
+
+        if let pair {
+            let background = JSONTheme.standard(pointSize: fontSize).emphasisBackground
+            for location in [pair.open, pair.close].compactMap({ $0 }) {
+                let range = NSRange(location: location, length: 1)
+                guard NSMaxRange(range) <= length else { continue }
+                storage.addAttribute(.backgroundColor, value: background, range: range)
+                emphasizedRanges.append(range)
+            }
+        }
         needsDisplay = true
     }
 
@@ -345,7 +429,6 @@ final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
         layoutManager.invalidateGlyphs(
             forCharacterRange: full, changeInLength: 0, actualCharacterRange: nil)
         layoutManager.invalidateLayout(forCharacterRange: full, actualCharacterRange: nil)
-        gutter?.needsDisplay = true
         needsDisplay = true
     }
 
@@ -412,47 +495,93 @@ final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
         return glyphs[0] == 0 ? nil : glyphs[0]
     }
 
-    // MARK: Indent guides
+    // MARK: Gutter & indent guides
+    //
+    // Both are drawn under the text, in the text view's own coordinate space —
+    // the layout manager's bounding rects plus the container inset. Because it
+    // all lives inside the text view, it scrolls and clips with the text and can
+    // never bleed into the surrounding SwiftUI views the way an `NSRulerView`
+    // did.
 
-    /// Faint verticals joining each multi-line block's brackets, so the nesting
-    /// reads at a glance instead of by counting spaces. Drawn under the text.
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
 
+        foldHitTargets = []
         guard let layoutManager, let textContainer, !blocks.isEmpty else { return }
         let inset = textContainerInset
         let colors = JSONTheme.standard(pointSize: fontSize).bracketColors
 
-        for block in foldableBlocks where !isFolded(block) {
-            guard let close = block.close else { continue }
+        for block in foldableBlocks {
+            // A block whose opening bracket is itself folded away (nested inside
+            // a collapsed parent) has no visible line to hang a control or guide
+            // on, so skip it.
+            guard !isHidden(block.open) else { continue }
+
             let openRect = layoutManager.boundingRect(
                 forGlyphRange: layoutManager.glyphRange(
                     forCharacterRange: NSRange(location: block.open, length: 1),
                     actualCharacterRange: nil),
                 in: textContainer)
-            let closeRect = layoutManager.boundingRect(
-                forGlyphRange: layoutManager.glyphRange(
-                    forCharacterRange: NSRange(location: close, length: 1),
-                    actualCharacterRange: nil),
-                in: textContainer)
 
-            // From under the opening bracket down to the closing one, on the
-            // bracket's own column.
-            let x = (openRect.minX + inset.width).rounded() + 0.5
-            let top = openRect.maxY + inset.height
-            let bottom = closeRect.minY + inset.height
-            guard bottom > top else { continue }
+            // Indent guide: a faint vertical joining the block's brackets, on the
+            // opening bracket's column, only while the block is open.
+            if !isFolded(block), let close = block.close {
+                let closeRect = layoutManager.boundingRect(
+                    forGlyphRange: layoutManager.glyphRange(
+                        forCharacterRange: NSRange(location: close, length: 1),
+                        actualCharacterRange: nil),
+                    in: textContainer)
+                let x = (openRect.minX + inset.width).rounded() + 0.5
+                let top = openRect.maxY + inset.height
+                let bottom = closeRect.minY + inset.height
+                if bottom > top {
+                    let line = NSBezierPath()
+                    line.move(to: NSPoint(x: x, y: top))
+                    line.line(to: NSPoint(x: x, y: bottom))
+                    line.lineWidth = 1
+                    colors[block.depth % colors.count].withAlphaComponent(0.22).setStroke()
+                    line.stroke()
+                }
+            }
 
-            let line = NSBezierPath()
-            line.move(to: NSPoint(x: x, y: top))
-            line.line(to: NSPoint(x: x, y: bottom))
-            line.lineWidth = 1
-            colors[block.depth % colors.count].withAlphaComponent(0.22).setStroke()
-            line.stroke()
+            // Fold control, in the left gutter, centred on the opening line.
+            let centerY = openRect.midY + inset.height
+            let box = NSRect(
+                x: Self.foldBoxX,
+                y: (centerY - Self.foldBoxSide / 2).rounded(),
+                width: Self.foldBoxSide,
+                height: Self.foldBoxSide)
+            // Always register the hit target so a click lands even if the mark
+            // was outside this particular dirty rect; only paint when it shows.
+            foldHitTargets.append((rect: box.insetBy(dx: -3, dy: -3), block: block))
+            guard box.intersects(rect) else { continue }
+            drawFoldControl(box: box, collapsed: isFolded(block))
         }
     }
 
-    // MARK: Keys
+    /// A rounded square with a minus (expanded) or a plus (collapsed) — the
+    /// disclosure idiom every JSON viewer uses.
+    private func drawFoldControl(box: NSRect, collapsed: Bool) {
+        NSColor.tertiaryLabelColor.setStroke()
+        let frame = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2)
+        frame.lineWidth = 1
+        frame.stroke()
+
+        NSColor.secondaryLabelColor.setStroke()
+        let mark = NSBezierPath()
+        let mid = NSPoint(x: box.midX, y: box.midY)
+        let arm = box.width / 2 - 2.5
+        mark.move(to: NSPoint(x: mid.x - arm, y: mid.y))
+        mark.line(to: NSPoint(x: mid.x + arm, y: mid.y))
+        if collapsed {
+            mark.move(to: NSPoint(x: mid.x, y: mid.y - arm))
+            mark.line(to: NSPoint(x: mid.x, y: mid.y + arm))
+        }
+        mark.lineWidth = 1
+        mark.stroke()
+    }
+
+    // MARK: Keys & mouse
 
     override func keyDown(with event: NSEvent) {
         // ⌘↩ → save. Return alone stays a newline in the field.
@@ -464,16 +593,14 @@ final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
     }
 
     // Tab arrives as an action, not a raw key: AppKit's key bindings already map
-    // ⇥ → insertTab: and ⇧⇥ → insertBacktab:, so intercepting here (rather than
-    // in `keyDown`) keeps the field's normal behaviour when the callback passes.
+    // ⇥ → insertTab: and ⇧⇥ → insertBacktab:. ⇥ indents the line(s) the selection
+    // touches, ⇧⇥ unindents them — never a JSON reformat.
     override func insertTab(_ sender: Any?) {
-        if onTab?() == true { return }
-        super.insertTab(sender)
+        indentSelectedLines(with: indentString)
     }
 
     override func insertBacktab(_ sender: Any?) {
-        if onBacktab?() == true { return }
-        super.insertBacktab(sender)
+        unindentSelectedLines(with: indentString)
     }
 
     /// ⌥⌘← / ⌥⌘→ fold and unfold the block around the caret — the same keys
@@ -503,10 +630,17 @@ final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
         }
     }
 
-    /// Clicking a collapsed run expands it — otherwise the caret would land
-    /// inside text you can't see.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+
+        // A fold control in the gutter toggles its block.
+        if let target = foldHitTargets.first(where: { $0.rect.contains(point) }) {
+            toggleFold(target.block)
+            return
+        }
+
+        // Clicking a collapsed run expands it — otherwise the caret would land
+        // inside text you can't see.
         let index = characterIndexForInsertion(at: point)
         if let run = hiddenRuns.first(where: { NSLocationInRange(index, $0) }) {
             folds.removeAll { NSIntersectionRange($0, run).length > 0 }
@@ -514,86 +648,5 @@ final class FoldingTextView: NSTextView, NSLayoutManagerDelegate {
             return
         }
         super.mouseDown(with: event)
-    }
-}
-
-// MARK: - The gutter
-
-/// The fold rail down the left edge: one control per multi-line block, at the
-/// line its opening bracket sits on. Clicking one collapses or expands it.
-final class JSONGutterView: NSRulerView {
-    private weak var textView: FoldingTextView?
-    /// Where each control was last drawn, so a click can be matched back to its
-    /// block without recomputing the layout.
-    private var hitTargets: [(rect: NSRect, block: JSONBlock)] = []
-
-    init(scrollView: NSScrollView, textView: FoldingTextView) {
-        self.textView = textView
-        super.init(scrollView: scrollView, orientation: .verticalRuler)
-        clientView = textView
-        ruleThickness = 16
-    }
-
-    @available(*, unavailable)
-    required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let textView,
-              let layoutManager = textView.layoutManager,
-              let container = textView.textContainer
-        else { return }
-
-        hitTargets = []
-        let inset = textView.textContainerInset.height
-        let side: CGFloat = 9
-
-        for block in textView.foldableBlocks {
-            let glyphRange = layoutManager.glyphRange(
-                forCharacterRange: NSRange(location: block.open, length: 1),
-                actualCharacterRange: nil)
-            let lineRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: container)
-
-            // Text-view coordinates → ruler coordinates, which is just the
-            // scroll offset the ruler already tracks.
-            let y = convert(NSPoint(x: 0, y: lineRect.midY + inset), from: textView).y
-            let box = NSRect(
-                x: (ruleThickness - side) / 2, y: (y - side / 2).rounded(), width: side, height: side)
-            guard box.intersects(rect) else { continue }
-
-            draw(box: box, collapsed: textView.isFolded(block))
-            hitTargets.append((rect: box.insetBy(dx: -3, dy: -3), block: block))
-        }
-    }
-
-    /// A rounded square with a minus (expanded) or a plus (collapsed) — the
-    /// disclosure idiom every JSON viewer uses, drawn small enough to sit in a
-    /// 16pt rail.
-    private func draw(box: NSRect, collapsed: Bool) {
-        NSColor.tertiaryLabelColor.setStroke()
-        let frame = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2)
-        frame.lineWidth = 1
-        frame.stroke()
-
-        NSColor.secondaryLabelColor.setStroke()
-        let mark = NSBezierPath()
-        let mid = NSPoint(x: box.midX, y: box.midY)
-        let arm = box.width / 2 - 2.5
-        mark.move(to: NSPoint(x: mid.x - arm, y: mid.y))
-        mark.line(to: NSPoint(x: mid.x + arm, y: mid.y))
-        if collapsed {
-            mark.move(to: NSPoint(x: mid.x, y: mid.y - arm))
-            mark.line(to: NSPoint(x: mid.x, y: mid.y + arm))
-        }
-        mark.lineWidth = 1
-        mark.stroke()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard let target = hitTargets.first(where: { $0.rect.contains(point) }) else {
-            super.mouseDown(with: event)
-            return
-        }
-        textView?.toggleFold(target.block)
     }
 }

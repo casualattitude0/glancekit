@@ -45,6 +45,7 @@ final class PluginRegistry {
         }
         migrateColorGlances()
         migratePomodoroSplit()
+        migrateTimeProdSplit()
     }
 
     // MARK: - Migrations
@@ -117,6 +118,57 @@ final class PluginRegistry {
             enabledIDs.insert(split)
         }
         defaults.removeObject(forKey: featureKey)
+
+        persist()
+    }
+
+    /// One-shot: the catch-all "timeprod" glance was retired. Its calendar +
+    /// meeting-join features were already superseded by the standalone
+    /// "nextmeeting" glance; its two remaining features became standalone
+    /// glances of their own — "reminders" and "countdowns". This lands each new
+    /// glance next to where timeprod sat and carries over whether the user had
+    /// that sub-feature switched on.
+    ///
+    /// Without this the new glances would be missing from `enabledIDs` — and
+    /// `register()` only seeds enabled state on a first-ever launch — so anyone
+    /// already using reminders or the countdown would find them silently gone.
+    /// (The countdown's *data* is migrated separately, inside `CountdownsPlugin`.)
+    private func migrateTimeProdSplit() {
+        let migrationKey = "glancekit.migration.timeprodSplit"
+        guard !defaults.bool(forKey: migrationKey) else { return }
+        defaults.set(true, forKey: migrationKey)
+
+        let source = "timeprod"
+
+        // Fresh install: nothing to carry over. Returning before `persist()`
+        // matters — writing the (empty) keys here would make `register()` think
+        // this isn't a first launch and skip seeding every glance on.
+        guard orderedIDs.contains(source) else { return }
+
+        // Both sub-features defaulted on, so a missing key means it was on.
+        let remindersOn = defaults.object(forKey: "glancekit.timeprod.reminders") as? Bool ?? true
+        let countdownOn = defaults.object(forKey: "glancekit.timeprod.countdown") as? Bool ?? true
+        let timeProdEnabled = enabledIDs.contains(source)
+
+        // Insert the split glances right after timeprod's old slot, in order.
+        if let slot = orderedIDs.firstIndex(of: source) {
+            for (offset, newID) in ["reminders", "countdowns"].enumerated()
+            where !orderedIDs.contains(newID) {
+                orderedIDs.insert(newID, at: slot + 1 + offset)
+            }
+        }
+
+        if timeProdEnabled, remindersOn { enabledIDs.insert("reminders") }
+        if timeProdEnabled, countdownOn { enabledIDs.insert("countdowns") }
+
+        // Retire the old glance and its now-defunct feature toggles.
+        orderedIDs.removeAll { $0 == source }
+        enabledIDs.remove(source)
+        for key in ["glancekit.timeprod.reminders", "glancekit.timeprod.countdown",
+                    "glancekit.timeprod.calendar", "glancekit.timeprod.worldClocks",
+                    "glancekit.timeprod.meetingJoin", "glancekit.timeprod.zones"] {
+            defaults.removeObject(forKey: key)
+        }
 
         persist()
     }

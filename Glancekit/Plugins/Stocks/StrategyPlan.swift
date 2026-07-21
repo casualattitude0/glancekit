@@ -12,7 +12,7 @@ import Foundation
 ///
 /// An optional `trigger` object per level sharpens the first half without
 /// touching the second. Where it's absent, the level still works — inferred
-/// from the level's own name and price. See `PLAN_SCHEMA.md`.
+/// from the level's own name and price. See `docs/PLAN_SCHEMA.md`.
 struct StrategyPlan: Codable, Equatable {
     var date: String?
     var generatedFrom: String?

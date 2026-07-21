@@ -18,7 +18,7 @@ import Observation
 /// - Popover: per-symbol rows, the portfolio, plus a plan section showing how
 ///   far the price is from each level.
 ///
-/// This is the reference implementation cited in `Core/PLUGIN_CONTRACT.md`.
+/// This is the reference implementation cited in `docs/PLUGIN_CONTRACT.md`.
 @MainActor
 @Observable
 final class StocksPlugin: GlancePlugin {
@@ -625,7 +625,7 @@ private struct StocksSettings: View {
             Text("""
                  Pick a JSON file; it reloads automatically whenever you save it. \
                  You get a notification when the price reaches one of the plan's \
-                 levels. See PLAN_SCHEMA.md for the format.
+                 levels. See docs/PLAN_SCHEMA.md for the format.
                  """)
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

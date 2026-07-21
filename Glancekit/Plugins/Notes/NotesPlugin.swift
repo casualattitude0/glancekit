@@ -53,11 +53,40 @@ private struct NotesPopover: View {
     /// always opens ready to write.
     @State private var mode: NotesMode = .write
 
+    /// The width our container actually offers us, measured off a zero-cost
+    /// background probe. The layout choice keys off *this* — not off the
+    /// editor's content — so nothing you type in the field can flip the layout.
+    @State private var containerWidth: CGFloat = 0
+
+    /// Above this we show the two-pane (saved sidebar beside the editor); below
+    /// it, the compact single column. Chosen so only the wide standalone window
+    /// (660pt) crosses it and the narrow menu popover (240pt) never does.
+    private let twoPaneThreshold: CGFloat = 520
+
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            twoPane
-            singleColumn
+        // A plain width comparison, not `ViewThatFits`. `ViewThatFits` re-measures
+        // its branches against their *content*, so a long line typed into the
+        // JSON field could tip it from two-pane to single column and back — the
+        // saved list "collapsing" and reappearing. Keying purely off the
+        // container width makes the choice stable while you type.
+        Group {
+            if containerWidth >= twoPaneThreshold {
+                twoPane
+            } else {
+                singleColumn
+            }
         }
+        // Fill the offered width so the probe below measures the *container*, not
+        // whichever branch happens to be showing (which would let the two widths
+        // chase each other).
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.task(id: proxy.size.width) {
+                    containerWidth = proxy.size.width
+                }
+            }
+        )
         .onAppear { wantsFocus = true }
     }
 
@@ -74,19 +103,17 @@ private struct NotesPopover: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.leading, 16)
         }
-        // A hard floor so `ViewThatFits` only takes this in the wide standalone
-        // window and falls back to the single column in the narrow menu.
-        .frame(minWidth: 500, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// Editor on top, saved shelf below — the compact menu-popover shape.
+    /// Editor on top, saved shelf below — the compact menu-popover shape. The
+    /// shelf is always present (it shows its own empty state) so the saved list
+    /// never collapses out of the layout.
     private var singleColumn: some View {
         VStack(alignment: .leading, spacing: 12) {
             NotesEditorColumn(store: store, mode: $mode,
                               wantsFocus: $wantsFocus, showNewNote: true)
-            if !store.notes.isEmpty {
-                NotesShelf(store: store)
-            }
+            NotesShelf(store: store)
         }
     }
 }
@@ -280,20 +307,23 @@ private struct NotesEditor: View {
                 Text("Write or paste something…  **markdown** works")
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
+                    // Sit exactly where the first character lands. With the text
+                    // container's line-fragment padding zeroed, the glyph origin is
+                    // textContainerInset.width (6); top = inset.height (8) plus the
+                    // 4pt the 1.25 line-height adds as leading above the first line.
+                    .padding(.leading, 6)
+                    .padding(.trailing, 12)
+                    .padding(.top, 12)
                     .allowsHitTesting(false)
             }
         }
     }
 }
 
-/// The same draft, edited as JSON: JSON colouring instead of markdown, and ⇥ /
-/// ⇧⇥ bound to expand / collapse.
-///
-/// The keys are the whole feature, so they're deliberately the *primary* way to
-/// format — the status bar below carries the same two actions as buttons for
-/// discoverability, not as the main path.
+/// The same draft, edited as JSON: JSON colouring instead of markdown, with ⇥ /
+/// ⇧⇥ indenting and unindenting the current line. Formatting the whole payload
+/// is a separate, explicit action — the Format / Minify buttons in the status
+/// bar below.
 private struct NotesJSONEditor: View {
     @Bindable var store: NotesStore
     @Binding var wantsFocus: Bool
@@ -304,25 +334,27 @@ private struct NotesJSONEditor: View {
             text: $store.draft,
             foldController: foldController,
             wantsFocus: $wantsFocus,
+            indentWidth: store.jsonIndent,
             onCommandReturn: {
                 store.save()
                 wantsFocus = true
-            },
-            // Returning false when the draft doesn't parse lets ⇥ insert a real
-            // tab instead of being swallowed — half-typed JSON still behaves
-            // like a text field.
-            onTab: { store.expandDraftJSON() },
-            onBacktab: { store.collapseDraftJSON() }
+            }
         )
         .frame(minHeight: 220)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .topLeading) {
             if store.draft.isEmpty {
-                Text("Paste JSON, then press ⇥ to format\nClick the gutter marks to fold a block")
+                Text("Paste JSON — ⇥ indents, ⇧⇥ unindents a line\nClick the gutter marks to fold a block")
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
+                    // Overlay the hint exactly where the first character and caret
+                    // land, so it reads as a true placeholder. With the container's
+                    // line-fragment padding zeroed, the text origin is the fold
+                    // gutter alone: leading = FoldingTextView.gutterWidth (22);
+                    // top = textContainerInset.height (8).
+                    .padding(.leading, 22)
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
                     .allowsHitTesting(false)
             }
         }
@@ -371,10 +403,10 @@ private struct NotesJSONStatusBar: View {
             // unavailable, so greying it out would hide the one useful thing.
             Group {
                 Button("Format") { store.expandDraftJSON() }
-                    .help("Expand to indented JSON (⇥)")
+                    .help("Expand the whole payload to indented JSON")
 
                 Button("Minify") { store.collapseDraftJSON() }
-                    .help("Collapse onto one line (⇧⇥)")
+                    .help("Collapse the whole payload onto one line")
             }
             .disabled(!store.canFormatDraft)
         }
@@ -394,10 +426,10 @@ private struct NotesJSONStatusBar: View {
         case .repairable(let summary, let repairs):
             // Says what it *will* change, not just that something's off — the
             // repairs are applied to your text, so they're the headline.
-            Label("\(summary) · fixes on ⇥: \(repairs.joined(separator: ", "))",
+            Label("\(summary) · fixes on Format: \(repairs.joined(separator: ", "))",
                   systemImage: "wand.and.sparkles")
                 .foregroundStyle(.secondary)
-                .help("This isn't strict JSON, but ⇥ will repair it: \(repairs.joined(separator: ", "))")
+                .help("This isn't strict JSON, but Format will repair it: \(repairs.joined(separator: ", "))")
         case .invalid(let message):
             Label(message, systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
@@ -481,11 +513,21 @@ private struct NotesShelf: View {
                 Text("Saved")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                NotesCountBadge(count: store.notes.count)
+                if !store.notes.isEmpty {
+                    NotesCountBadge(count: store.notes.count)
+                }
             }
             .padding(.horizontal, 2)
 
-            NotesRowsList(store: store)
+            if store.notes.isEmpty {
+                Text("No saved notes yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 4)
+            } else {
+                NotesRowsList(store: store)
+            }
         }
         .padding(.top, 2)
     }
@@ -595,7 +637,7 @@ private struct NotesSettings: View {
             .pickerStyle(.segmented)
             .fixedSize()
 
-            SettingsHelp("In JSON mode, ⇥ expands the draft to indented JSON and ⇧⇥ collapses it onto one line.")
+            SettingsHelp("In JSON mode, ⇥ indents the current line and ⇧⇥ unindents it. Use the Format / Minify buttons to reflow the whole payload.")
         }
         .confirmationDialog(
             "Delete all notes?",

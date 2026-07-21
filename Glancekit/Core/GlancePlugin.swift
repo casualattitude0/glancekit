@@ -31,7 +31,7 @@ enum GlanceCategory: String, CaseIterable, Comparable {
         switch id {
         case "system", "power", "network":
             return .system
-        case "notes", "habits", "pomodoro", "timeprod", "timers", "nextmeeting":
+        case "notes", "habits", "pomodoro", "reminders", "countdowns", "timers", "nextmeeting":
             return .productivity
         case "stocks", "currency":
             return .finance
@@ -50,7 +50,7 @@ enum GlanceCategory: String, CaseIterable, Comparable {
 ///
 /// Plugins are reference types marked `@Observable` (Observation framework) so
 /// SwiftUI views re-render automatically when their data changes after a
-/// `refresh()`. See `Core/PLUGIN_CONTRACT.md` for the full authoring guide and
+/// `refresh()`. See `docs/PLUGIN_CONTRACT.md` for the full authoring guide and
 /// the Stocks plugin as the worked example.
 @MainActor
 protocol GlancePlugin: AnyObject {

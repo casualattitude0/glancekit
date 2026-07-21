@@ -37,7 +37,8 @@ Glances are grouped into categories in Settings.
 | Notes | A quick-capture field and a list of everything you've saved — local and private |
 | Habits | Daily habits with completion streaks |
 | Pomodoro | Focus/break cycles with long breaks and a session tally |
-| Time & Productivity | World clocks, your next event, reminders, a countdown |
+| Reminders | Your open reminders grouped by overdue, today and upcoming — tick them off in place |
+| Countdowns | Any number of named countdowns to a date, ticking live and sorted soonest-first |
 | Timers | Multiple concurrent countdown timers plus a stopwatch |
 | Next Meeting | A live countdown ring, one-click Join, and today's remaining agenda |
 
@@ -184,7 +185,7 @@ protocol GlancePlugin: AnyObject {
 }
 ```
 
-Most requirements have defaults, so a minimal glance implements only `id`, `title`, `iconSystemName`, `refresh()`, and `popoverSection()`. The **Stocks** plugin is the worked reference. See [`Glancekit/Core/PLUGIN_CONTRACT.md`](Glancekit/Core/PLUGIN_CONTRACT.md) for the full contract and rules.
+Most requirements have defaults, so a minimal glance implements only `id`, `title`, `iconSystemName`, `refresh()`, and `popoverSection()`. The **Stocks** plugin is the worked reference. See [`docs/PLUGIN_CONTRACT.md`](docs/PLUGIN_CONTRACT.md) for the full contract and rules.
 
 ## Project layout
 
