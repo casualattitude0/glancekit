@@ -488,9 +488,13 @@ enum TriggerResolver {
             // wick" — honouring it is what stops an intraday spike through a
             // stop from firing an alert the plan never intended. Both spellings
             // are read, so a plan written in either language behaves the same.
-            onClose: t?.onClose ?? prose.contains("收盤")
+            // Parenthesised so an explicit `onClose: false` wins: `??` binds
+            // tighter than `||`, so without these the two English prose checks
+            // sit outside the `??` and force on-close even when the trigger set
+            // it false. All three spellings must be the fallback, not just 收盤.
+            onClose: t?.onClose ?? (prose.contains("收盤")
                 || prose.lowercased().contains("on close")
-                || prose.lowercased().contains("at the close"),
+                || prose.lowercased().contains("at the close")),
             volume: t?.volumeLots ?? inferredVolume(from: prose),
             confirmWithinDays: t?.confirmWithinDays ?? 3,
             approachBands: t?.approachBands,
