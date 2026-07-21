@@ -87,6 +87,10 @@ struct JSONEditor: NSViewRepresentable {
         let container = NSTextContainer(
             size: NSSize(width: contentSize.width, height: bigDimension))
         container.widthTracksTextView = true
+        // Drop AppKit's default 5pt line-fragment padding so the text origin is
+        // exactly `textContainerInset.width` — the placeholder overlay and the
+        // fold-gutter geometry both assume the first glyph lands at `gutterWidth`.
+        container.lineFragmentPadding = 0
         layoutManager.addTextContainer(container)
 
         let textView = FoldingTextView(

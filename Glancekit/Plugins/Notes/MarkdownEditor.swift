@@ -51,6 +51,9 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(
             width: contentSize.width, height: bigDimension)
+        // Drop AppKit's default 5pt line-fragment padding so the text origin is
+        // exactly `textContainerInset.width`; the placeholder overlay aligns to it.
+        textView.textContainer?.lineFragmentPadding = 0
 
         textView.delegate = context.coordinator
         // Routed through the coordinator rather than captured directly: the

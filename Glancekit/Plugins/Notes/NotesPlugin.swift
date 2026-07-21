@@ -307,8 +307,13 @@ private struct NotesEditor: View {
                 Text("Write or paste something…  **markdown** works")
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
+                    // Sit exactly where the first character lands. With the text
+                    // container's line-fragment padding zeroed, the glyph origin is
+                    // textContainerInset.width (6); top = inset.height (8) plus the
+                    // 4pt the 1.25 line-height adds as leading above the first line.
+                    .padding(.leading, 6)
+                    .padding(.trailing, 12)
+                    .padding(.top, 12)
                     .allowsHitTesting(false)
             }
         }
@@ -343,10 +348,10 @@ private struct NotesJSONEditor: View {
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     // Overlay the hint exactly where the first character and caret
-                    // land, so it reads as a true placeholder. The JSON editor's
-                    // text origin is offset by the fold gutter, which lives in the
-                    // text view's left inset: leading = FoldingTextView.gutterWidth
-                    // (22); top = textContainerInset.height (8).
+                    // land, so it reads as a true placeholder. With the container's
+                    // line-fragment padding zeroed, the text origin is the fold
+                    // gutter alone: leading = FoldingTextView.gutterWidth (22);
+                    // top = textContainerInset.height (8).
                     .padding(.leading, 22)
                     .padding(.trailing, 12)
                     .padding(.top, 8)
