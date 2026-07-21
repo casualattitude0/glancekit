@@ -820,15 +820,9 @@ private struct NetworkSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Latency hosts")
-                .font(.headline)
-            Text("Hosts pinged for the reachability / latency probe. The starred host drives the headline and the history sparkline.")
-                .font(.caption).foregroundStyle(.secondary)
-
+        SettingsPage("Latency hosts", intro: "Hosts pinged for the reachability / latency probe. The starred host drives the headline and the history sparkline.") {
             if plugin.hosts.isEmpty {
-                Text("No hosts — add one below.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No hosts — add one below.")
             } else {
                 List {
                     ForEach(plugin.hosts) { host in
@@ -890,14 +884,13 @@ private struct NetworkSettings: View {
 
             Divider()
 
-            Text("Rows to show")
-                .font(.headline)
-            Toggle("Public IP", isOn: $plugin.showPublicIP)
-            Toggle("Gateway", isOn: $plugin.showGateway)
-            Toggle("Latency, history & hosts", isOn: $plugin.showLatency)
-            Toggle("Wi-Fi", isOn: $plugin.showWiFi)
-            Toggle("VPN", isOn: $plugin.showVPN)
-            Toggle("Interfaces", isOn: $plugin.showInterfaces)
+            SettingsSectionHeader("Rows to show")
+            SettingsToggleRow("Public IP", isOn: $plugin.showPublicIP)
+            SettingsToggleRow("Gateway", isOn: $plugin.showGateway)
+            SettingsToggleRow("Latency, history & hosts", isOn: $plugin.showLatency)
+            SettingsToggleRow("Wi-Fi", isOn: $plugin.showWiFi)
+            SettingsToggleRow("VPN", isOn: $plugin.showVPN)
+            SettingsToggleRow("Interfaces", isOn: $plugin.showInterfaces)
         }
     }
 }

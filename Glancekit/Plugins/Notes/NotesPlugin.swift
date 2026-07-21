@@ -573,11 +573,7 @@ private struct NotesSettings: View {
     @State private var isConfirmingDeleteAll = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Notes are stored on this Mac only, as plain markdown — don't keep passwords or other secrets here.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage("Notes", intro: "Notes are stored on this Mac only, as plain markdown — don't keep passwords or other secrets here.") {
             HStack {
                 Text("^[\(store.notes.count) note](inflect: true) saved")
                 Spacer()
@@ -587,10 +583,9 @@ private struct NotesSettings: View {
 
             Divider()
 
-            Text("JSON mode")
-                .font(.subheadline.weight(.semibold))
+            SettingsSectionHeader("JSON mode")
 
-            Toggle("Sort object keys when formatting", isOn: $store.sortJSONKeys)
+            SettingsToggleRow("Sort object keys when formatting", isOn: $store.sortJSONKeys)
 
             Picker("Indent", selection: $store.jsonIndent) {
                 Text("2 spaces").tag(2)
@@ -600,9 +595,7 @@ private struct NotesSettings: View {
             .pickerStyle(.segmented)
             .fixedSize()
 
-            Text("In JSON mode, ⇥ expands the draft to indented JSON and ⇧⇥ collapses it onto one line.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsHelp("In JSON mode, ⇥ expands the draft to indented JSON and ⇧⇥ collapses it onto one line.")
         }
         .confirmationDialog(
             "Delete all notes?",

@@ -341,17 +341,9 @@ private struct GitHubSettings: View {
     @State private var addFailed: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("GitHub Accounts")
-                .font(.headline)
-            Text("Add one or more accounts. Create a fine-grained token at github.com/settings/tokens with read-only access to: Notifications, Pull requests, Checks (or Commit statuses), and Metadata. Tokens are stored in Glancekit's credentials file (readable only by your macOS account), never in app preferences.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage("GitHub Accounts", intro: "Add one or more accounts. Create a fine-grained token at github.com/settings/tokens with read-only access to: Notifications, Pull requests, Checks (or Commit statuses), and Metadata. Tokens are stored in Glancekit's credentials file (readable only by your macOS account), never in app preferences.") {
             if plugin.accounts.isEmpty {
-                Text("No accounts yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp("No accounts yet.")
             } else {
                 ForEach(plugin.accounts) { account in
                     GitHubAccountRow(plugin: plugin, account: account)
@@ -361,8 +353,7 @@ private struct GitHubSettings: View {
 
             // Add-account form.
             VStack(alignment: .leading, spacing: 8) {
-                Text("Add account")
-                    .font(.subheadline.weight(.semibold))
+                SettingsSectionHeader("Add account")
                 TextField("Label (e.g. Work, Personal)", text: $newLabel)
                     .textFieldStyle(.roundedBorder)
                 SecureField("ghp_… or github_pat_…", text: $newToken)

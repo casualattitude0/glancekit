@@ -324,20 +324,12 @@ private struct SystemStatsSettings: View {
     @Bindable var plugin: SystemStatsPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Metrics")
-                .font(.headline)
-            Text("Choose which local system metrics to show. Nothing here uses the network.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage("Metrics", intro: "Choose which local system metrics to show. Nothing here uses the network.") {
             ForEach(SystemStatsPlugin.Metric.allCases) { metric in
-                Toggle(isOn: Binding(
+                SettingsToggleRow(metric.label, isOn: Binding(
                     get: { plugin.isEnabled(metric) },
                     set: { plugin.setEnabled(metric, $0) }
-                )) {
-                    Label(metric.label, systemImage: metric.icon)
-                }
+                ))
             }
         }
     }

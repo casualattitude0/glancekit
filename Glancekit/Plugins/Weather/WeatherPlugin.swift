@@ -440,12 +440,7 @@ private struct WeatherSettings: View {
     @State private var searchError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Location")
-                .font(.headline)
-            Text("Search for a city or area. Data comes from the keyless Open-Meteo API.")
-                .font(.caption).foregroundStyle(.secondary)
-
+        SettingsPage("Location", intro: "Search for a city or area. Data comes from the keyless Open-Meteo API.") {
             HStack(spacing: 6) {
                 Image(systemName: "location.fill")
                     .font(.caption)

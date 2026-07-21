@@ -14,16 +14,11 @@ struct MCPSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Tools & MCP Servers")
-                .font(.headline)
-            Text("Connect MCP servers to expand what the assistant can do. Local servers run a command over stdio (e.g. npx); remote servers connect over HTTP. Mutating actions and external tools ask before running.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsSectionHeader("Tools & MCP Servers")
+            SettingsHelp("Connect MCP servers to expand what the assistant can do. Local servers run a command over stdio (e.g. npx); remote servers connect over HTTP. Mutating actions and external tools ask before running.")
 
             if store.servers.isEmpty {
-                Text("No MCP servers configured.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp("No MCP servers configured.")
             } else {
                 VStack(spacing: 6) {
                     ForEach(store.servers) { server in
@@ -49,10 +44,8 @@ struct MCPSettingsView: View {
 
             if !approval.alwaysAllowed.isEmpty {
                 Divider()
-                Text("Always-allowed tools")
-                    .font(.subheadline.weight(.semibold))
-                Text("Tools you told the assistant to run without asking.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsSectionHeader("Always-allowed tools")
+                SettingsHelp("Tools you told the assistant to run without asking.")
                 ForEach(approval.alwaysAllowed.sorted(), id: \.self) { name in
                     HStack {
                         Text(name).font(.caption.monospaced())
@@ -171,6 +164,7 @@ private struct MCPServerRow: View {
         HStack(spacing: 8) {
             Toggle("", isOn: Binding(get: { server.enabled }, set: { _ in onToggle() }))
                 .labelsHidden()
+                .toggleStyle(.switch)
             VStack(alignment: .leading, spacing: 1) {
                 Text(server.name).font(.callout.weight(.medium))
                 Text(subtitle)

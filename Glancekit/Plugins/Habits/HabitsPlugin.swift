@@ -756,10 +756,8 @@ private struct HabitsSettings: View {
     @State private var route: HabitsSheetRoute?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        SettingsPage("Your habits") {
             HStack {
-                Text("Your habits")
-                    .font(.headline)
                 Spacer()
                 Button {
                     route = .add
@@ -769,9 +767,7 @@ private struct HabitsSettings: View {
             }
 
             if plugin.activeHabits.isEmpty {
-                Text("No habits yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp("No habits yet.")
             } else {
                 ForEach(plugin.activeHabits) { habit in
                     HabitsSettingsRow(
@@ -785,9 +781,7 @@ private struct HabitsSettings: View {
 
             if !plugin.archivedHabits.isEmpty {
                 Divider()
-                Text("Archived")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                SettingsSectionHeader("Archived")
                 ForEach(plugin.archivedHabits) { habit in
                     HabitsArchivedRow(plugin: plugin, habit: habit) {
                         route = .detail(habit.id)

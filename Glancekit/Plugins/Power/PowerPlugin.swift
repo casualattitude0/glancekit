@@ -1094,29 +1094,23 @@ private struct PowerSettings: View {
     @Bindable var plugin: PowerPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Detail rows")
-                .font(.headline)
-            Text("Choose which battery details appear in the popover.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            Toggle("Charge advisor", isOn: $plugin.showAdvice)
-            Toggle("Health at a glance summary", isOn: $plugin.showSummary)
-            Toggle("Battery usage suggestion", isOn: $plugin.showTip)
-            Toggle("Battery health %", isOn: $plugin.showHealth)
-            Toggle("Cycle count", isOn: $plugin.showCycles)
-            Toggle("Temperature", isOn: $plugin.showTemperature)
-            Toggle("Power draw (watts)", isOn: $plugin.showPower)
-            Toggle("Voltage", isOn: $plugin.showVoltage)
-            Toggle("Full-charge capacity (mAh)", isOn: $plugin.showCapacity)
-            Toggle("Time on battery", isOn: $plugin.showTimeOnBattery)
-            Toggle("Power adapter", isOn: $plugin.showAdapter)
-            Toggle("Condition", isOn: $plugin.showCondition)
+        SettingsPage("Detail rows", intro: "Choose which battery details appear in the popover.") {
+            SettingsToggleRow("Charge advisor", isOn: $plugin.showAdvice)
+            SettingsToggleRow("Health at a glance summary", isOn: $plugin.showSummary)
+            SettingsToggleRow("Battery usage suggestion", isOn: $plugin.showTip)
+            SettingsToggleRow("Battery health %", isOn: $plugin.showHealth)
+            SettingsToggleRow("Cycle count", isOn: $plugin.showCycles)
+            SettingsToggleRow("Temperature", isOn: $plugin.showTemperature)
+            SettingsToggleRow("Power draw (watts)", isOn: $plugin.showPower)
+            SettingsToggleRow("Voltage", isOn: $plugin.showVoltage)
+            SettingsToggleRow("Full-charge capacity (mAh)", isOn: $plugin.showCapacity)
+            SettingsToggleRow("Time on battery", isOn: $plugin.showTimeOnBattery)
+            SettingsToggleRow("Power adapter", isOn: $plugin.showAdapter)
+            SettingsToggleRow("Condition", isOn: $plugin.showCondition)
 
             Divider()
 
-            Text("Charge history")
-                .font(.headline)
+            SettingsSectionHeader("Charge history")
             Picker("Samples shown", selection: $plugin.historyWindow) {
                 Text("Last 30").tag(30)
                 Text("Last 60").tag(60)
@@ -1127,22 +1121,18 @@ private struct PowerSettings: View {
 
             Divider()
 
-            Text("Low-battery alert")
-                .font(.headline)
+            SettingsSectionHeader("Low-battery alert")
             Stepper(value: $plugin.lowThreshold, in: 5...50, step: 5) {
                 Text("Alert at \(plugin.lowThreshold)% or below")
                     .font(.callout)
             }
-            Text("The Smart Panel raises an urgent card when the battery drains to this level.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("The Smart Panel raises an urgent card when the battery drains to this level.")
 
             Divider()
 
-            Text("Charge advisor")
-                .font(.headline)
-            Text("Advice blends your recent drain rate, battery health and temperature with the current charge.")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("Protect longevity (suggest unplugging at the ceiling)", isOn: $plugin.protectLongevity)
+            SettingsSectionHeader("Charge advisor")
+            SettingsHelp("Advice blends your recent drain rate, battery health and temperature with the current charge.")
+            SettingsToggleRow("Protect longevity (suggest unplugging at the ceiling)", isOn: $plugin.protectLongevity)
             // Each end is bounded by the other, keeping a 10-point band
             // between them: floor above ceiling has no coherent meaning and
             // leaves the advisor with no resting state.
@@ -1158,16 +1148,13 @@ private struct PowerSettings: View {
                 Text("Comfort floor \(plugin.chargeFloor)%")
                     .font(.callout)
             }
-            Text("Heavy usage, a high cycle count or degraded health automatically tightens both ends.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Cycle-life advice assumes an Apple silicon Mac (~\(PowerAdvisor.ratedCycles) rated cycles). Older Intel Macs were rated far lower, so their pacing would read optimistically.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Heavy usage, a high cycle count or degraded health automatically tightens both ends.")
+            SettingsHelp("Cycle-life advice assumes an Apple silicon Mac (~\(PowerAdvisor.ratedCycles) rated cycles). Older Intel Macs were rated far lower, so their pacing would read optimistically.")
 
             Divider()
 
-            Text("Charge reminders")
-                .font(.headline)
-            Toggle("Remind me to charge or unplug", isOn: $plugin.remindCharge)
+            SettingsSectionHeader("Charge reminders")
+            SettingsToggleRow("Remind me to charge or unplug", isOn: $plugin.remindCharge)
             Stepper(value: $plugin.reminderLeadMinutes, in: 10...120, step: 10) {
                 Text("Warn ~\(plugin.reminderLeadMinutes) min before \(plugin.lowThreshold)%")
                     .font(.callout)
@@ -1178,22 +1165,19 @@ private struct PowerSettings: View {
                     .font(.callout)
             }
             .disabled(!plugin.remindCharge)
-            Text("The lead time is based on your measured drain rate, so a heavy session warns you earlier.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("The lead time is based on your measured drain rate, so a heavy session warns you earlier.")
 
             Divider()
 
-            Text("Notifications")
-                .font(.headline)
-            Toggle("Notify when fully charged", isOn: $plugin.alertFullCharge)
-            Toggle("Warn on overheat", isOn: $plugin.alertOverheat)
+            SettingsSectionHeader("Notifications")
+            SettingsToggleRow("Notify when fully charged", isOn: $plugin.alertFullCharge)
+            SettingsToggleRow("Warn on overheat", isOn: $plugin.alertOverheat)
             Stepper(value: $plugin.overheatThreshold, in: 30...50, step: 1) {
                 Text("Overheat above \(plugin.overheatThreshold)°C")
                     .font(.callout)
             }
             .disabled(!plugin.alertOverheat)
-            Text("Best-effort banners with an audible cue; each fires once per crossing.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Best-effort banners with an audible cue; each fires once per crossing.")
         }
     }
 }

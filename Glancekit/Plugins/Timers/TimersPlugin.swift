@@ -873,9 +873,8 @@ private struct TimersSettings: View {
     @State private var newTemplateSeconds = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Alerts").font(.headline)
-            Toggle("Play sound on finish", isOn: $plugin.playSound)
+        SettingsPage("Alerts") {
+            SettingsToggleRow("Play sound on finish", isOn: $plugin.playSound)
             HStack {
                 Picker("Finish sound", selection: $plugin.finishSoundName) {
                     ForEach(TimersPlugin.soundChoices, id: \.self) { name in
@@ -889,15 +888,15 @@ private struct TimersSettings: View {
             }
             // Whether a finished timer notifies at all; how it notifies (panel,
             // system record, corner, dwell) lives in Settings ▸ Notifications.
-            Toggle("Notify when a timer finishes", isOn: $plugin.showNotification)
-            Text("Notifications require Glancekit to be allowed under System Settings › Notifications. If denied, the finish sound still plays.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow(
+                "Notify when a timer finishes",
+                detail: "Notifications require Glancekit to be allowed under System Settings › Notifications. If denied, the finish sound still plays.",
+                isOn: $plugin.showNotification)
 
             Divider()
 
-            Text("Quick-add presets").font(.headline)
-            Text("Comma-separated minutes shown as buttons in the popover.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("Quick-add presets")
+            SettingsHelp("Comma-separated minutes shown as buttons in the popover.")
             HStack {
                 TextField("1, 3, 5, 10, 25", text: $presetsText)
                     .textFieldStyle(.roundedBorder)
@@ -922,13 +921,11 @@ private struct TimersSettings: View {
 
     private var templatesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Saved templates").font(.headline)
-            Text("Named presets (e.g. “Tea 4:00”). Tap one in the popover to start it.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("Saved templates")
+            SettingsHelp("Named presets (e.g. “Tea 4:00”). Tap one in the popover to start it.")
 
             if plugin.templates.isEmpty {
-                Text("No templates yet.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No templates yet.")
             } else {
                 ForEach(plugin.templates) { template in
                     HStack(spacing: 8) {

@@ -186,11 +186,7 @@ private struct StocksSettings: View {
     @State private var savedNote: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Watchlist")
-                .font(.headline)
-            Text("Comma-separated ticker symbols.")
-                .font(.caption).foregroundStyle(.secondary)
+        SettingsPage("Watchlist", intro: "Comma-separated ticker symbols.") {
             TextField("AAPL, MSFT, NVDA", text: $symbolsText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...4)
@@ -204,10 +200,8 @@ private struct StocksSettings: View {
 
             Divider()
 
-            Text("Finnhub API key (optional)")
-                .font(.headline)
-            Text("Provide a key for more reliable quotes. Stored in Glancekit's credentials file, not in app preferences. Leave blank to use the keyless Yahoo source.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("Finnhub API key (optional)")
+            SettingsHelp("Provide a key for more reliable quotes. Stored in Glancekit's credentials file, not in app preferences. Leave blank to use the keyless Yahoo source.")
             SecureField("Finnhub API key", text: $finnhubKey)
                 .textFieldStyle(.roundedBorder)
             HStack {

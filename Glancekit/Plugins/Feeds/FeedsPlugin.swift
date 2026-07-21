@@ -558,10 +558,7 @@ private struct FeedsSettings: View {
     @State private var addError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Feeds")
-                .font(.headline)
-
+        SettingsPage("Feeds") {
             // Add-a-feed form.
             VStack(alignment: .leading, spacing: 6) {
                 TextField("Feed URL (https://example.com/feed.xml)", text: $newURL)
@@ -578,11 +575,9 @@ private struct FeedsSettings: View {
             }
 
             if plugin.feedSources.isEmpty {
-                Text("No feeds configured. Add one above.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No feeds configured. Add one above.")
             } else {
-                Text("Drag to reorder. Toggle to enable/disable without removing.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Drag to reorder. Toggle to enable/disable without removing.")
                 List {
                     ForEach($plugin.feedSources) { $source in
                         FeedsSourceRow(source: $source) {
@@ -597,7 +592,7 @@ private struct FeedsSettings: View {
 
             Divider()
 
-            Toggle("Include Hacker News front page", isOn: $plugin.hackerNewsEnabled)
+            SettingsToggleRow("Include Hacker News front page", isOn: $plugin.hackerNewsEnabled)
                 .onChange(of: plugin.hackerNewsEnabled) { _, _ in
                     Task { await plugin.refresh() }
                 }

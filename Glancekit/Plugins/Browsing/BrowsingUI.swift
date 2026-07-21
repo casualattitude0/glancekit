@@ -382,54 +382,42 @@ struct BrowsingSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Browsers")
-                .font(.callout.weight(.semibold))
+        SettingsPage("Browsing") {
+            SettingsSectionHeader("Browsers")
 
             if availableBrowsers.isEmpty {
-                Text("No supported browsers found.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No supported browsers found.")
             } else {
                 ForEach(availableBrowsers) { browser in
                     browserRow(browser)
                 }
             }
 
-            Text("Only the browser you're currently looking at is read, and only while it's already running. Firefox is read from its own history file instead of by automation, so it needs no permission.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Only the browser you're currently looking at is read, and only while it's already running. Firefox is read from its own history file instead of by automation, so it needs no permission.")
 
             Divider()
 
             Stepper(value: $plugin.maxEntries, in: 25...500, step: 25) {
                 Text("Max history: \(plugin.maxEntries) pages")
             }
-            Text("Pinned pages are always kept and don't count toward this limit.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Pinned pages are always kept and don't count toward this limit.")
 
             Divider()
 
-            Toggle("Skip private and incognito windows", isOn: $plugin.skipsPrivateWindows)
-            Text("Reliable for Chrome and other Chromium browsers. Safari does not tell apps which of its windows are private, so private Safari tabs are still recorded — block the domain or pause recording instead.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow("Skip private and incognito windows", detail: "Reliable for Chrome and other Chromium browsers. Safari does not tell apps which of its windows are private, so private Safari tabs are still recorded — block the domain or pause recording instead.", isOn: $plugin.skipsPrivateWindows)
 
-            Toggle("Ignore query strings", isOn: $plugin.stripsQueryStrings)
-            Text("Drops everything after “?”, collapsing tracking-parameter variants into one entry. Leave off if you want search results and app URLs kept intact.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow("Ignore query strings", detail: "Drops everything after “?”, collapsing tracking-parameter variants into one entry. Leave off if you want search results and app URLs kept intact.", isOn: $plugin.stripsQueryStrings)
 
-            Toggle("Pause recording", isOn: $plugin.isPaused)
+            SettingsToggleRow("Pause recording", isOn: $plugin.isPaused)
             if let until = plugin.pausedUntil, until > Date() {
-                Text("Timed pause active until \(until.formatted(date: .omitted, time: .shortened)).")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Timed pause active until \(until.formatted(date: .omitted, time: .shortened)).")
             }
 
-            Toggle("Clear history when quitting", isOn: $plugin.clearOnQuit)
-            Text("On quit, removes unpinned pages. Pinned pages are kept.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsToggleRow("Clear history when quitting", detail: "On quit, removes unpinned pages. Pinned pages are kept.", isOn: $plugin.clearOnQuit)
 
             Divider()
 
-            Text("Never record")
-                .font(.callout.weight(.semibold))
+            SettingsSectionHeader("Never record")
 
             HStack(spacing: 6) {
                 TextField("example.com", text: $newDomain)
@@ -440,8 +428,7 @@ struct BrowsingSettings: View {
             }
 
             if plugin.blockedDomains.isEmpty {
-                Text("No blocked domains. Adding one also deletes anything already recorded from it, including its subdomains.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("No blocked domains. Adding one also deletes anything already recorded from it, including its subdomains.")
             } else {
                 ForEach(plugin.blockedDomains, id: \.self) { domain in
                     HStack {
@@ -457,8 +444,7 @@ struct BrowsingSettings: View {
                         .help("Remove")
                     }
                 }
-                Text("Subdomains are blocked too, so example.com also covers mail.example.com.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHelp("Subdomains are blocked too, so example.com also covers mail.example.com.")
             }
 
             Divider()
@@ -468,8 +454,7 @@ struct BrowsingSettings: View {
             } label: {
                 Label("Clear all history", systemImage: "trash")
             }
-            Text("Removes every page, including pinned ones.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Removes every page, including pinned ones.")
         }
         .onAppear(perform: refreshStatuses)
         .onReceive(statusPoll) { _ in refreshStatuses() }
@@ -491,6 +476,7 @@ struct BrowsingSettings: View {
             Toggle(isOn: binding(for: browser)) {
                 Label(browser.displayName, systemImage: browser.systemImage)
             }
+            .toggleStyle(.switch)
             Spacer()
             if plugin.enabledBrowsers.contains(browser), browser.family != .firefox {
                 permissionStatus(for: browser)

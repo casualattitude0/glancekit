@@ -654,27 +654,24 @@ private struct NextMeetingSettings: View {
     @Bindable var plugin: NextMeetingPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Join").font(.headline)
-            Toggle("Show meeting Join button", isOn: $plugin.meetingJoinEnabled)
+        SettingsPage("Join") {
+            SettingsToggleRow("Show meeting Join button", isOn: $plugin.meetingJoinEnabled)
 
             Divider()
 
-            Text("Auto-open").font(.headline)
-            Toggle("Auto-open meeting link before start", isOn: $plugin.autoOpenEnabled)
+            SettingsSectionHeader("Auto-open")
+            SettingsToggleRow("Auto-open meeting link before start", isOn: $plugin.autoOpenEnabled)
             Stepper(
                 "Open \(plugin.autoOpenMinutes) minute\(plugin.autoOpenMinutes == 1 ? "" : "s") before start",
                 value: $plugin.autoOpenMinutes,
                 in: 0...30
             )
             .disabled(!plugin.autoOpenEnabled)
-            Text("Best-effort: opens the next meeting's link once when it comes within range.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsHelp("Best-effort: opens the next meeting's link once when it comes within range.")
 
             Divider()
 
-            Text("Agenda").font(.headline)
+            SettingsSectionHeader("Agenda")
             Stepper(
                 "Show up to \(plugin.todayLimit) event\(plugin.todayLimit == 1 ? "" : "s") today",
                 value: $plugin.todayLimit,
@@ -690,8 +687,8 @@ private struct NextMeetingSettings: View {
                 value: $plugin.lookAheadDays,
                 in: 1...30
             )
-            Toggle("Hide all-day events", isOn: $plugin.hideAllDay)
-            Toggle("Show declined events", isOn: $plugin.showDeclined)
+            SettingsToggleRow("Hide all-day events", isOn: $plugin.hideAllDay)
+            SettingsToggleRow("Show declined events", isOn: $plugin.showDeclined)
 
             Divider()
 
@@ -699,7 +696,7 @@ private struct NextMeetingSettings: View {
 
             Divider()
 
-            Text("Access").font(.headline)
+            SettingsSectionHeader("Access")
             Button("Grant Calendar access") {
                 Task { await plugin.requestCalendarAccess() }
             }
@@ -718,7 +715,7 @@ private struct NextMeetingCalendarPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Calendars").font(.headline)
+                SettingsSectionHeader("Calendars")
                 Spacer()
                 Button("All") { plugin.selectAllCalendars() }
                     .controlSize(.small)
@@ -727,13 +724,9 @@ private struct NextMeetingCalendarPicker: View {
             }
 
             if !plugin.calendarAuthorized {
-                Text("Grant Calendar access to choose calendars.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp("Grant Calendar access to choose calendars.")
             } else if calendars.isEmpty {
-                Text("No calendars found.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsHelp("No calendars found.")
             } else {
                 ForEach(calendars) { calendar in
                     Toggle(isOn: Binding(

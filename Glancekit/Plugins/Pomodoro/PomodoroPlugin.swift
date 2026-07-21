@@ -156,8 +156,7 @@ private struct PomodoroSettings: View {
     @Bindable var timer: PomodoroTimer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Durations").font(.headline)
+        SettingsPage("Durations") {
             Stepper("Focus: ^[\(timer.workMinutes) minute](inflect: true)",
                     value: $timer.workMinutes, in: 1...180)
             Stepper("Short break: ^[\(timer.shortBreakMinutes) minute](inflect: true)",
@@ -166,15 +165,14 @@ private struct PomodoroSettings: View {
                     value: $timer.longBreakMinutes, in: 1...180)
             Stepper("Long break after ^[\(timer.longBreakInterval) session](inflect: true)",
                     value: $timer.longBreakInterval, in: 2...12)
-            Text("Changing a duration takes effect on the next phase, or right away if the current one hasn't started.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsHelp("Changing a duration takes effect on the next phase, or right away if the current one hasn't started.")
 
             Divider()
 
-            Text("Behavior").font(.headline)
-            Toggle("Start breaks automatically", isOn: $timer.autoStartBreaks)
-            Toggle("Start the next focus session automatically", isOn: $timer.autoStartWork)
-            Toggle("Play a sound when a phase ends", isOn: $timer.playSound)
+            SettingsSectionHeader("Behavior")
+            SettingsToggleRow("Start breaks automatically", isOn: $timer.autoStartBreaks)
+            SettingsToggleRow("Start the next focus session automatically", isOn: $timer.autoStartWork)
+            SettingsToggleRow("Play a sound when a phase ends", isOn: $timer.playSound)
         }
     }
 }

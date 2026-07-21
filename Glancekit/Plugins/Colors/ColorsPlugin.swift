@@ -851,18 +851,13 @@ private struct ColorsSettings: View {
     private let store = ColorFavoritesStore.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Colors")
-                .font(.headline)
-
-            Toggle("Uppercase hex codes", isOn: $plugin.uppercase)
+        SettingsPage("Colors") {
+            SettingsToggleRow("Uppercase hex codes", isOn: $plugin.uppercase)
 
             Divider()
 
-            Text("History")
-                .font(.headline)
-            Text("Keeps the last 12 picked colors.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("History")
+            SettingsHelp("Keeps the last 12 picked colors.")
             Button("Clear history", role: .destructive) {
                 plugin.clearHistory()
             }
@@ -870,10 +865,8 @@ private struct ColorsSettings: View {
 
             Divider()
 
-            Text("Favorites")
-                .font(.headline)
-            Text("Star a color to keep it here.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingsSectionHeader("Favorites")
+            SettingsHelp("Star a color to keep it here.")
             Button("Clear favorites", role: .destructive) {
                 store.clear()
             }

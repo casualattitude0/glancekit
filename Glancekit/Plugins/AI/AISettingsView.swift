@@ -19,13 +19,10 @@ struct AISettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("AI Assistant")
-                .font(.headline)
-            Text("Connect a provider so the assistant can answer in the popover. Your API key is stored in Glancekit's credentials file (readable only by your macOS account), never in app preferences.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+        SettingsPage(
+            "AI Assistant",
+            intro: "Connect a provider so the assistant can answer in the popover. Your API key is stored in Glancekit's credentials file (readable only by your macOS account), never in app preferences."
+        ) {
             Picker("Provider", selection: providerSelection) {
                 ForEach(AIProvider.catalog) { provider in
                     Text(provider.name).tag(provider.id)
@@ -97,7 +94,7 @@ struct AISettingsView: View {
                 }
                 Text("The longest reply the assistant may write. Pay-as-you-go gateways reserve this whole amount before answering and refuse the request if your balance can't cover it — lower it if you hit a credit error. The Smart Panel's one-line summary always uses far less.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -110,7 +107,7 @@ struct AISettingsView: View {
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
                 Text("Sets the assistant's persona and instructions.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
 
             statusLine
@@ -153,22 +150,4 @@ struct AISettingsView: View {
     }
 }
 
-/// A caption label stacked above its field — the compact form row this page uses
-/// so the provider fields read consistently.
-private struct LabeledField<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-            content
-        }
-    }
-}
+// `LabeledField` now lives in `SettingsKit` and is shared across the form pages.
