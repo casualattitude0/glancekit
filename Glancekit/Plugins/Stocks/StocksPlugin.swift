@@ -416,7 +416,7 @@ final class StocksPlugin: GlancePlugin {
         return GlanceSignal(
             priority: .elevated, score: 10 - nearest.distance,
             headline: String(format: "%@ nearing %@ %@ (%.2f%%)",
-                             nearest.stock, StocksFormat.levelLabel(nearest.status.kind),
+                             nearest.stock, StocksFormat.levelLabel(nearest.status.kind, plan: nearest.status.label),
                              StocksFormat.price(line), nearest.distance),
             detail: nearest.status.condition,
             systemImage: iconSystemName,

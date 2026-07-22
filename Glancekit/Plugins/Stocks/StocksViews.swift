@@ -37,6 +37,7 @@ enum StocksFormat {
         switch kind {
         case "entry": return "Entry"
         case "add": return "Add"
+        case "target": return "Re-eval Zone"
         case "trim": return "Trim"
         case "reduce": return "Reduce"
         case "cut": return "Stop"
@@ -44,6 +45,15 @@ enum StocksFormat {
         case "gate": return "Index gate"
         default: return kind
         }
+    }
+
+    /// Prefers the plan's own bilingual label ("潛在建倉 Potential Entry") when
+    /// it supplied one, falling back to the inferred English name. This is the
+    /// naming-discipline contract: the plan decides what a level is called, so a
+    /// threshold reads as "潛在" until its condition is actually met and never
+    /// as a bare instruction.
+    static func levelLabel(_ kind: String, plan: String?) -> String {
+        (plan?.isEmpty == false ? plan : nil) ?? levelLabel(kind)
     }
 
     /// Taiwanese and Japanese prices sit on coarse tick grids and are usually
@@ -138,8 +148,18 @@ enum StocksFormat {
         switch kind {
         case "trim", "reduce", "cut": return .red
         case "entry", "add", "reentry": return .green
+        // 重評區 is neither a buy nor a sell — reaching it forces a re-evaluation,
+        // so it takes a caution hue rather than borrowing green or red.
+        case "target": return .orange
         default: return .secondary
         }
+    }
+
+    /// A level's tint, softened for postures that aren't ordinary live triggers:
+    /// a `watch_only` reclassification threshold reads as advisory, not as the
+    /// buy/sell its slot might otherwise imply.
+    static func tint(for kind: String, state: LevelState) -> Color {
+        state == .watchOnly ? .secondary : tint(for: kind)
     }
 }
 
@@ -1427,11 +1447,11 @@ struct StocksPlanRowSummary: View {
             if let nearest {
                 let distance = nearest.distancePercent ?? 0
                 Capsule()
-                    .fill(StocksFormat.tint(for: nearest.kind))
+                    .fill(StocksFormat.tint(for: nearest.kind, state: nearest.state))
                     .frame(width: 3, height: 11)
                 Text(StocksFormat.levelLabel(nearest.kind))
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(StocksFormat.tint(for: nearest.kind))
+                    .foregroundStyle(StocksFormat.tint(for: nearest.kind, state: nearest.state))
                 if let line = nearest.line {
                     Text(StocksFormat.price(line, market: quote?.market ?? .tw))
                         .font(.caption2.monospacedDigit())
@@ -1505,12 +1525,18 @@ struct StocksLevelLadder: View {
                 .frame(width: 46, alignment: .trailing)
 
             Rectangle()
-                .fill(StocksFormat.tint(for: status.kind).opacity(status.hasFired ? 0.9 : 0.45))
+                .fill(StocksFormat.tint(for: status.kind, state: status.state).opacity(status.hasFired ? 0.9 : 0.45))
                 .frame(width: 14, height: isCurrent ? 2 : 1.5)
 
-            Text(StocksFormat.levelLabel(status.kind))
+            // The rung carries the plan's own bilingual label ("潛在建倉
+            // Potential Entry") so a price in the ladder reads as the condition
+            // it is, not a bare order — a 潛在 threshold and a 重分類觀察 line
+            // can't be mistaken for a live buy. State-aware tint mutes a
+            // watch_only rung so it doesn't wear a green/red action colour.
+            Text(StocksFormat.levelLabel(status.kind, plan: status.label))
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(StocksFormat.tint(for: status.kind))
+                .foregroundStyle(StocksFormat.tint(for: status.kind, state: status.state))
+                .lineLimit(1)
 
             if let band = status.band, band.count >= 2 {
                 Text("\(StocksFormat.price(band[0], market: market))–\(StocksFormat.price(band[band.count - 1], market: market))")
@@ -1655,14 +1681,14 @@ struct StocksStockDetail: View {
                             // An approach warning and a real trigger must never
                             // look alike in a list you scan in a hurry.
                             if let band = alert.approachBand {
-                                Text("nearing \(StocksFormat.levelLabel(alert.levelKind)) "
+                                Text("nearing \(StocksFormat.levelLabel(alert.levelKind, plan: alert.levelLabel)) "
                                      + (alert.approachBandIsTWD
                                         ? StocksFormat.money(band, market: market)
                                         : StocksFormat.price(band, market: market) + "%"))
                                     .font(.caption2)
                                     .foregroundStyle(.orange)
                             } else {
-                                Text("\(StocksFormat.levelLabel(alert.levelKind)) \(StocksFormat.price(alert.price, market: market))")
+                                Text("\(StocksFormat.levelLabel(alert.levelKind, plan: alert.levelLabel)) \(StocksFormat.price(alert.price, market: market))")
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(StocksFormat.tint(for: alert.levelKind))
                             }
@@ -1677,9 +1703,15 @@ struct StocksStockDetail: View {
                 ForEach(rows) { row in
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 5) {
-                            Text(StocksFormat.levelLabel(row.kind))
+                            // The bilingual label is the widest thing on this
+                            // row and the one that must never crop — it's what
+                            // says 潛在／重分類觀察／停損. It wins the space; the
+                            // trade numbers beside it are short and fixed-width.
+                            Text(StocksFormat.levelLabel(row.kind, plan: row.label))
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(StocksFormat.tint(for: row.kind))
+                                .foregroundStyle(StocksFormat.tint(for: row.kind, state: row.state))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .layoutPriority(1)
                             if let line = row.line {
                                 Text(StocksFormat.price(line, market: market))
                                     .font(.caption.monospacedDigit())
@@ -1706,10 +1738,17 @@ struct StocksStockDetail: View {
                                 Text("≈ \(shares) sh")
                                     .font(.caption2.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(row.instruction?.isShort == true ? .orange : .primary)
-                            } else if let note = row.instruction?.note {
-                                Text(note).font(.caption2).foregroundStyle(.tertiary)
                             }
                             Spacer(minLength: 0)
+                        }
+                        // A note ("Already held — an averaging level…") can run
+                        // long, so it gets its own wrapping line rather than
+                        // crowding — and cropping — the label row above.
+                        if row.instruction?.shares == nil, let note = row.instruction?.note {
+                            Text(note)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if let condition = row.condition {
                             Text(condition)
