@@ -8,6 +8,10 @@ struct StrategyAlert: Identifiable, Equatable {
     let symbol: MarketSymbol
     let stockName: String
     let levelKind: String
+    /// The plan's bilingual label for this level ("潛在建倉 Potential Entry"),
+    /// when it supplied one — preferred over the app's inferred English name
+    /// wherever the alert is shown.
+    var levelLabel: String? = nil
     let title: String
     let body: String
     let price: Double
@@ -28,6 +32,12 @@ struct StrategyAlert: Identifiable, Equatable {
 struct LevelStatus: Identifiable, Equatable {
     let id: String
     let kind: String
+    /// The plan's posture for this level, so the row can style a `watch_only`
+    /// threshold or a `committed` stop differently from an ordinary potential.
+    let state: LevelState
+    /// The plan's bilingual label ("潛在減碼 Potential Trim"), when supplied;
+    /// the row prefers it over the inferred English name.
+    let label: String?
     let line: Double?
     let distancePercent: Double?
     let hasFired: Bool
@@ -203,6 +213,8 @@ final class StrategyEngine {
                 rows.append(LevelStatus(
                     id: "\(stock.stockId)|\(kind)",
                     kind: kind,
+                    state: trigger.state,
+                    label: trigger.displayLabel,
                     line: line,
                     distancePercent: line.map { $0 == 0 ? 0 : (quote.price - $0) / $0 * 100 },
                     hasFired: fired.contains(key),
@@ -419,6 +431,18 @@ final class StrategyEngine {
         }
         guard distance > 0 else { return nil }
 
+        // Position-aware silencing. A distance-only heads-up is direction-
+        // correct but blind to what you're actually holding, which is what makes
+        // a pullback confusing: after price rallies above entry/add and falls
+        // back, the buy-side line re-arms from below and nudges you to "buy"
+        // a position you're already in, right next to the sell-side warning that
+        // actually matters. "Holding" here means EITHER the portfolio shows
+        // shares OR a buy-side level has already fired today.
+        let isSellSide = trigger.kind == "trim" || trigger.kind == "reduce" || trigger.kind == "cut"
+        // A sell-side heads-up you can't act on: don't warn about nearing a
+        // reduce/cut when we're confident there's nothing to reduce or cut.
+        if isSellSide && confidentlyFlat(symbol: symbol, stock: stock, plan: plan) { return nil }
+
         // The tightest band the price is now inside.
         guard let band = bands.sorted().first(where: { distance <= $0 }) else { return nil }
         let unit = inTWD ? "twd" : "pct"
@@ -430,13 +454,33 @@ final class StrategyEngine {
             fired.insert("approach|\(plan.date ?? "-")|\(stock.stockId)|\(trigger.kind)|\(unit)|\(Self.bandKey(wider))")
         }
 
-        let label = label(for: trigger.kind)
+        let label = trigger.displayLabel ?? label(for: trigger.kind)
+
+        // Reframe a buy-side heads-up when you already hold. Price dipping back
+        // into an entry/add line is an averaging opportunity, not a fresh
+        // "time to buy" — so the title says so, and a note spells it out, rather
+        // than repeating the entry nudge you already acted on.
+        let reframeAsAdd = trigger.opensPosition
+            && isHolding(symbol: symbol, stock: stock, plan: plan)
+        let action = stock.levels?[trigger.kind]?.size?.action
+        let title: String
+        if reframeAsAdd {
+            let zone = trigger.kind == "entry" ? "average-down zone" : "add zone"
+            title = "\(stock.displayName) \(symbol.code) · pullback into \(label) \(fmt(line)) · \(zone)"
+        } else {
+            title = "\(stock.displayName) \(symbol.code) · nearing \(label) \(fmt(line))"
+                + (action.map { " · \($0)" } ?? "")
+        }
+
         return StrategyAlert(
             id: key, symbol: symbol, stockName: stock.displayName,
             levelKind: trigger.kind,
-            title: "\(stock.displayName) \(symbol.code) · nearing \(label) \(fmt(line))"
-                + (stock.levels?[trigger.kind]?.size?.action.map { " · \($0)" } ?? ""),
+            levelLabel: trigger.displayLabel,
+            title: title,
             body: [
+                reframeAsAdd
+                    ? "You already hold this — an averaging level, not a fresh entry."
+                    : nil,
                 "\(money(distance, symbol.market)) / \(String(format: "%.2f", distance / line * 100))% away"
                     + " (now \(fmt(price)))",
                 stock.levels?[trigger.kind]?.size?.summary.map { summary in
@@ -458,6 +502,42 @@ final class StrategyEngine {
             approachBandIsTWD: inTWD)
     }
 
+    /// Whether you effectively hold this stock right now — the portfolio shows
+    /// shares, or a buy-side level (entry/add/reentry) has already fired today.
+    /// Either signal counts, so a position carried in from before the plan date
+    /// and one just opened this session both read as held.
+    private func isHolding(symbol: MarketSymbol,
+                           stock: StrategyPlan.StockPlan,
+                           plan: StrategyPlan) -> Bool {
+        if let shares = holdings?.position(for: symbol)?.shares, shares > 0 { return true }
+        return buySideFiredToday(stock: stock, plan: plan)
+    }
+
+    /// Confident there is nothing to sell: holdings are known and show no shares,
+    /// and no buy-side level has fired today. When holdings are unknown we stay
+    /// silent about it and let the warning through — hiding a real sell-side
+    /// heads-up on a guess is the worse failure.
+    private func confidentlyFlat(symbol: MarketSymbol,
+                                 stock: StrategyPlan.StockPlan,
+                                 plan: StrategyPlan) -> Bool {
+        guard let holdings else { return false }
+        let shares = holdings.position(for: symbol)?.shares ?? 0
+        return shares <= 0 && !buySideFiredToday(stock: stock, plan: plan)
+    }
+
+    private func buySideFiredToday(stock: StrategyPlan.StockPlan,
+                                   plan: StrategyPlan) -> Bool {
+        let levels = stock.levels ?? [:]
+        for kind in ["entry", "add", "reentry"] {
+            guard let level = levels[kind] else { continue }
+            let op = TriggerResolver.resolve(kind: kind, level: level).op
+            if fired.contains(dedupeKey(plan: plan, stock: stock, kind: kind, op: op)) {
+                return true
+            }
+        }
+        return false
+    }
+
     /// `5.0` and `5` must produce the same dedupe key, or a band would re-fire.
     private static func bandKey(_ band: Double) -> String {
         String(format: "%.4f", band)
@@ -473,7 +553,8 @@ final class StrategyEngine {
         // even when it shows nothing else — and "進場 1355" without "+1/3" is
         // an alert that tells you something happened but not what to do about
         // it, which is the one thing this whole glance exists to answer.
-        var title = "\(stock.displayName) \(symbol.code) · \(label(for: kind)) \(fmt(quote.price))"
+        let name = level.label ?? label(for: kind)
+        var title = "\(stock.displayName) \(symbol.code) · \(name) \(fmt(quote.price))"
         if let action = level.size?.action { title += " · \(action)" }
 
         // The share count goes in the title next to the fraction: "+1/3" is the
@@ -498,7 +579,7 @@ final class StrategyEngine {
         if let note = stock.positionPath?.note { lines.append(note) }
 
         return StrategyAlert(id: key, symbol: symbol, stockName: stock.displayName,
-                             levelKind: kind, title: title,
+                             levelKind: kind, levelLabel: level.label, title: title,
                              body: lines.joined(separator: "\n"),
                              price: quote.price, firedAt: now)
     }
