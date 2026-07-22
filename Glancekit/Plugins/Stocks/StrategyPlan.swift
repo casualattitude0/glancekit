@@ -180,7 +180,7 @@ struct StrategyPlan: Codable, Equatable {
     /// `reduce` sits between `trim` and `cut` — the plan's own escalation is
     /// 釋出警戒 → 減倉警戒 → 全數出倉警戒, and showing them out of that order
     /// would misrepresent how bad things have got.
-    static let levelOrder = ["entry", "add", "trim", "reduce", "cut", "reentry"]
+    static let levelOrder = ["entry", "add", "target", "trim", "reduce", "cut", "reentry"]
 }
 
 /// One entry of `holding-plan.json`'s `positions[]` — a holding with the day's
@@ -288,8 +288,25 @@ struct PlanLevel: Codable, Equatable {
     var source: String?
     /// Optional machine-readable sharpening. Absent → inferred, see `ResolvedTrigger`.
     var trigger: PlanTrigger?
+    /// The level's posture, set by the plan generator: `potential` (condition
+    /// not yet met today — most levels), `active` (met today, actionable now),
+    /// `watch_only` (a reclassification threshold on a 🔥/🧊 name, **never** a
+    /// build signal), or `committed` (a stop that is set and not re-evaluated).
+    ///
+    /// This is the naming-discipline contract: a price in a plan is a
+    /// *condition*, not an order, and `state` is what keeps a threshold from
+    /// being read — or fired — as an instruction. Absent → treated as
+    /// `potential`, which is the pre-`state` behaviour.
+    var state: LevelState?
+    /// A ready-made bilingual display string ("潛在建倉 Potential Entry") the
+    /// generator composes from the kind + state. Preferred over the app's own
+    /// inferred English label wherever it's present; `state` wins on any
+    /// disagreement. Absent → fall back to `StocksFormat.levelLabel`.
+    var label: String?
 
-    enum CodingKeys: String, CodingKey { case price, condition, size, source, trigger }
+    enum CodingKeys: String, CodingKey {
+        case price, condition, size, source, trigger, state, label
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -297,6 +314,8 @@ struct PlanLevel: Codable, Equatable {
         size = try c.decodeIfPresent(PositionChange.self, forKey: .size)
         source = try c.decodeIfPresent(String.self, forKey: .source)
         trigger = try c.decodeIfPresent(PlanTrigger.self, forKey: .trigger)
+        state = try c.decodeIfPresent(LevelState.self, forKey: .state)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
 
         // `price` is a scalar for most levels but an array for a retest band
         // (`"add": {"price": [1348, 1355]}`). Both spellings are in real plans,
@@ -322,6 +341,31 @@ struct PlanLevel: Codable, Equatable {
         try c.encodeIfPresent(size, forKey: .size)
         try c.encodeIfPresent(source, forKey: .source)
         try c.encodeIfPresent(trigger, forKey: .trigger)
+        try c.encodeIfPresent(state, forKey: .state)
+        try c.encodeIfPresent(label, forKey: .label)
+    }
+}
+
+// MARK: - Level state
+
+/// A level's posture in the day's plan — see `PlanLevel.state`.
+///
+/// The two that change app behaviour are `watchOnly` (a 🔥/🧊 reclassification
+/// threshold that must never fire a build alert) and, for display, everything
+/// else keeping its "潛在／建倉／停損" wording via the plan's `label`.
+enum LevelState: String, Codable {
+    case potential
+    case active
+    case watchOnly = "watch_only"
+    case committed
+
+    /// Unknown values degrade to `.potential` rather than failing the whole
+    /// plan file — `state` is an open vocabulary on the generator's side, and
+    /// one unrecognised string must not take every alert down with it. Potential
+    /// is the pre-`state` behaviour: displayed, and fires if it's evaluable.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LevelState(rawValue: raw.lowercased()) ?? .potential
     }
 }
 
@@ -427,9 +471,16 @@ struct ResolvedTrigger: Equatable {
     /// Per-level approach distances **in TWD**; nil means fall back to the
     /// glance-wide percentage bands.
     var approachBands: [Double]?
-    /// True when nothing in the level was machine-readable enough to evaluate.
-    /// Such a level is still *displayed*, it just never fires by itself.
+    /// True when nothing in the level was machine-readable enough to evaluate,
+    /// or its `state` forbids firing (`watch_only`). Such a level is still
+    /// *displayed*, it just never fires by itself.
     var isAdvisoryOnly: Bool
+    /// The plan's posture for this level, carried through for display and to
+    /// decide firing. `watch_only` is the one that must never raise a build
+    /// alert; the rest ride along so the UI can label them honestly.
+    var state: LevelState
+    /// The plan's ready-made bilingual label, when it supplied one.
+    var displayLabel: String?
 
     /// Levels that open or grow a position — the ones the market gate suppresses.
     var opensPosition: Bool { kind == "entry" || kind == "add" || kind == "reentry" }
@@ -476,7 +527,15 @@ enum TriggerResolver {
             || (band?.isEmpty == false && op == .enterBand)
             || (t?.op != nil && (op == .reclaimWithinDays || op == .breakdownHeldDays))
         let hasExplicitOp = t?.op != nil
-        let isAdvisoryOnly = !evaluable || (defaultOp == nil && !hasExplicitOp)
+        let state = level.state ?? .potential
+        // `watch_only` is a reclassification threshold on a 🔥/🧊 name, not a
+        // build signal — reaching it changes the stock's flag in tomorrow's
+        // warm-up, it does not open a position today. Forcing advisory-only here
+        // is what actually stops a plan like 昇達科's 1,255 reclaim line from
+        // firing an "entry" alert it was never meant to raise.
+        let isAdvisoryOnly = state == .watchOnly
+            || !evaluable
+            || (defaultOp == nil && !hasExplicitOp)
 
         return ResolvedTrigger(
             kind: kind,
@@ -498,7 +557,9 @@ enum TriggerResolver {
             volume: t?.volumeLots ?? inferredVolume(from: prose),
             confirmWithinDays: t?.confirmWithinDays ?? 3,
             approachBands: t?.approachBands,
-            isAdvisoryOnly: isAdvisoryOnly
+            isAdvisoryOnly: isAdvisoryOnly,
+            state: state,
+            displayLabel: level.label
         )
     }
 

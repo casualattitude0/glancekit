@@ -43,6 +43,8 @@
       "levels": {
         "entry": {
           "price": 1355,
+          "state": "potential",
+          "label": "潛在建倉 Potential Entry",
           "condition": "收盤突破且量≥2602張＋外資轉連買；不追第一根",
           "size": { "action": "+1/3", "after": "1/3" },
           "source": "平台頸線(6/25起平台1195–1355)",
@@ -57,6 +59,8 @@
 
         "add": {
           "price": [1348, 1355],
+          "state": "potential",
+          "label": "潛在加碼 Potential Add",
           "condition": "突破後回踩不破、量縮",
           "size": { "action": "+1/3", "after": "2/3" },
           "source": "突破回測帶",
@@ -70,6 +74,8 @@
 
         "trim": {
           "price": 1298,
+          "state": "potential",
+          "label": "潛在減碼 Potential Trim",
           "condition": "收盤跌破",
           "size": { "action": "sell 1/2 of holdings", "after": "1/3" },
           "source": "MA20=1297.75(釋出警戒)",
@@ -78,6 +84,8 @@
 
         "reduce": {
           "price": 1255,
+          "state": "potential",
+          "label": "潛在減倉 Potential Reduce",
           "condition": "收盤跌破(缺口開始回補)",
           "size": { "action": "sell 1/2 of holdings", "after": "1/6" },
           "source": "7/16突破缺口上緣(減倉警戒)",
@@ -86,6 +94,8 @@
 
         "cut": {
           "price": 1195,
+          "state": "committed",
+          "label": "停損 Stop",
           "condition": "收盤跌破(缺口全補=假突破確認)",
           "size": { "action": "sell all", "after": "0" },
           "source": "缺口下緣=平台下緣",
@@ -98,6 +108,8 @@
         },
 
         "reentry": {
+          "state": "potential",
+          "label": "潛在回補 Potential Re-entry",
           "condition": "破1195後3日內帶量收回→全補",
           "size": { "action": "buy back to prior level", "after": "原水位" },
           "source": "3日洗盤規則",
@@ -113,6 +125,8 @@
 
       "target": {
         "band": [1450, 1470],
+        "state": "potential",
+        "label": "重評區 Re-eval Zone",
         "source": "6/23空方缺口回補"
       },
 
@@ -137,11 +151,15 @@
       "levels": {
         "entry": {
           "price": 2420,
+          "state": "potential",
+          "label": "潛在建倉 Potential Entry",
           "condition": "收盤收復空方缺口上緣",
           "size": { "action": "+1/3", "after": "1/3" }
         },
         "cut": {
           "price": 2210,
+          "state": "committed",
+          "label": "停損 Stop",
           "condition": "收盤跌破",
           "size": { "action": "sell all", "after": "0" }
         }
