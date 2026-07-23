@@ -432,7 +432,7 @@ private struct NotesJSONStatusBar: View {
                 .help("This isn't strict JSON, but Format will repair it: \(repairs.joined(separator: ", "))")
         case .invalid(let message):
             Label(message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlanceStyle.warning)
         }
     }
 }

@@ -127,11 +127,11 @@ struct AISettingsView: View {
         if store.isConfigured {
             Label("Configured", systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(GlanceStyle.positive)
         } else {
             Label(missingHint, systemImage: "exclamationmark.circle")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlanceStyle.warning)
         }
     }
 

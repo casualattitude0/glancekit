@@ -385,14 +385,13 @@ private struct WeatherPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             if let temp = plugin.current?.temperature {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("\(Int(temp.rounded()))\(plugin.unitSuffix)")
-                        .font(.system(size: 44, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
+                        .font(GlanceStyle.hero(44))
                     if let today = plugin.forecast.first {
                         Image(systemName: today.symbolName)
                             .font(.title)
@@ -478,7 +477,7 @@ private struct WeatherSettings: View {
             if let searchError {
                 Label(searchError, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             if !results.isEmpty {

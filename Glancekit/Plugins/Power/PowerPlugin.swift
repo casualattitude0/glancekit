@@ -722,11 +722,11 @@ private struct PowerPopover: View {
         let snap = plugin.snapshot
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(snap.percentage.map { "\($0)%" } ?? "—")
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .font(GlanceStyle.hero(40, weight: .bold))
                 .monospacedDigit()
             if snap.state == .charging || snap.state == .charged {
                 Image(systemName: "bolt.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(GlanceStyle.positive)
                     .font(.title2)
             }
             Spacer()
@@ -866,7 +866,7 @@ private struct PowerPopover: View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "lightbulb.fill")
                 .font(.caption)
-                .foregroundStyle(.yellow)
+                .foregroundStyle(GlanceStyle.highlight)
             Text(tip)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1002,9 +1002,9 @@ private struct PowerPopover: View {
             // full range.
             HStack(alignment: .center, spacing: 6) {
                 VStack {
-                    Text("100").font(.system(size: 8)).foregroundStyle(.tertiary)
+                    Text("100").font(GlanceStyle.micro).foregroundStyle(.tertiary)
                     Spacer()
-                    Text("0").font(.system(size: 8)).foregroundStyle(.tertiary)
+                    Text("0").font(GlanceStyle.micro).foregroundStyle(.tertiary)
                 }
                 .frame(height: 40)
                 PowerSparkline(values: shown.map { Double($0.percent) })

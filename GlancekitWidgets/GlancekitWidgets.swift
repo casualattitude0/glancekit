@@ -24,7 +24,7 @@ private struct UpdatedFooter: View {
     let date: Date
     var body: some View {
         Text("as of \(date, style: .time)")
-            .font(.system(size: 9))
+            .font(GlanceStyle.mini)
             .foregroundStyle(.secondary)
     }
 }
@@ -150,7 +150,7 @@ private struct NextEventWidgetView: View {
             } else {
                 Text("No upcoming events").font(.callout).foregroundStyle(.secondary)
                 Text("(grant Calendar access in Glancekit)")
-                    .font(.system(size: 9)).foregroundStyle(.tertiary)
+                    .font(GlanceStyle.mini).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
             UpdatedFooter(date: entry.date)
@@ -255,7 +255,7 @@ private struct GitHubWidgetView: View {
             } else {
                 Spacer(minLength: 0)
                 if entry.configured {
-                    Text("Couldn't load — check token").font(.caption).foregroundStyle(.orange)
+                    Text("Couldn't load — check token").font(.caption).foregroundStyle(GlanceStyle.warning)
                 } else {
                     Text("Edit widget to add a GitHub token").font(.caption).foregroundStyle(.secondary)
                 }
@@ -367,7 +367,7 @@ private struct GitHubPRRow: View {
             Circle().fill(ciColor).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 0) {
                 Text(pr.title).font(.caption).lineLimit(1)
-                Text("\(pr.repo) #\(pr.number)").font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                Text("\(pr.repo) #\(pr.number)").font(GlanceStyle.mini).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
         }
@@ -392,7 +392,7 @@ private struct GitHubNotificationRow: View {
             Circle().fill(Color.blue).frame(width: 6, height: 6)
             VStack(alignment: .leading, spacing: 0) {
                 Text(note.title).font(.caption).lineLimit(1)
-                Text(note.repo).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                Text(note.repo).font(GlanceStyle.mini).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
         }
@@ -706,7 +706,7 @@ private struct CustomAPIWidgetView: View {
             if let value = entry.result.value {
                 Text(value).font(.title2.weight(.semibold).monospacedDigit()).lineLimit(2).minimumScaleFactor(0.65)
             } else {
-                Text(entry.result.error ?? "No value").font(.caption).foregroundStyle(.orange).lineLimit(3)
+                Text(entry.result.error ?? "No value").font(.caption).foregroundStyle(GlanceStyle.warning).lineLimit(3)
             }
             Spacer(minLength: 0)
             UpdatedFooter(date: entry.date)
@@ -835,7 +835,7 @@ private struct ColorPaletteWidgetView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(color(for: hex))
                             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
-                        Text(normalizedHex(hex)).font(.system(size: 9, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(normalizedHex(hex)).font(GlanceStyle.mini.monospaced()).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -934,14 +934,13 @@ private struct WeatherWidgetView: View {
             if let temperature = entry.weather.temperature {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("\(Int(temperature.rounded()))°")
-                        .font(.system(size: family == .systemSmall ? 40 : 46, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
+                        .font(GlanceStyle.hero(family == .systemSmall ? 40 : 46))
                     if let current = entry.weather.forecast.first {
                         Image(systemName: current.symbolName).font(.title2).symbolRenderingMode(.multicolor)
                     }
                 }
             } else {
-                Text(entry.weather.error ?? "No weather data").font(.caption).foregroundStyle(.orange).lineLimit(2)
+                Text(entry.weather.error ?? "No weather data").font(.caption).foregroundStyle(GlanceStyle.warning).lineLimit(2)
             }
             if !entry.weather.forecast.isEmpty {
                 ForEach(Array(entry.weather.forecast.prefix(family == .systemSmall ? 2 : 3))) { day in

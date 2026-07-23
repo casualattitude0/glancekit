@@ -365,7 +365,7 @@ struct StocksQuoteRow: View {
     @ViewBuilder private var marketBadge: some View {
         if showsMarketBadge {
             Text(quote.market.badge)
-                .font(.system(size: 8, weight: .bold))
+                .font(GlanceStyle.micro.weight(.bold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 3)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 2))
@@ -380,7 +380,7 @@ struct StocksQuoteRow: View {
     @ViewBuilder private var limitBadge: some View {
         if let limit = limitState {
             Text(limit.label)
-                .font(.system(size: 8, weight: .bold))
+                .font(GlanceStyle.micro.weight(.bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
@@ -465,7 +465,7 @@ struct StocksFeedStatus: View {
                     .opacity(beat ? 1 : 0.75)
                 if labelled {
                     Text(market.badge)
-                        .font(.system(size: 9, weight: .semibold).monospaced())
+                        .font(GlanceStyle.mini.weight(.semibold).monospaced())
                         .foregroundStyle(.tertiary)
                 }
                 Text(state.label)
@@ -489,7 +489,7 @@ struct StocksFeedStatus: View {
                     // types — Color and HierarchicalShapeStyle don't unify.
                     Text(age.label)
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(age.late ? AnyShapeStyle(Color.orange)
+                        .foregroundStyle(age.late ? AnyShapeStyle(GlanceStyle.warning)
                                                   : AnyShapeStyle(.tertiary))
                 }
             }
@@ -775,7 +775,7 @@ struct StocksHoldingsSection: View {
                               systemImage: copied ? "checkmark" : "doc.on.doc")
                     }
                     .font(.caption).controlSize(.small).buttonStyle(.borderless)
-                    .foregroundStyle(copied ? Color.green : Color.accentColor)
+                    .foregroundStyle(copied ? GlanceStyle.positive : Color.accentColor)
                     .help("Copy the full holdings JSON, in the file's own shape")
                 }
                 Button { source.chooseFile() } label: {
@@ -792,7 +792,7 @@ struct StocksHoldingsSection: View {
 
             if let error = source.error {
                 Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption2).foregroundStyle(.orange)
+                    .font(.caption2).foregroundStyle(GlanceStyle.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -811,7 +811,7 @@ struct StocksHoldingsSection: View {
                 if source.isStale {
                     Label("Holdings aren't from today — share counts may be out of date",
                           systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2.weight(.medium)).foregroundStyle(.orange)
+                        .font(.caption2.weight(.medium)).foregroundStyle(GlanceStyle.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -831,7 +831,7 @@ struct StocksHoldingsSection: View {
                     Label("No plan: \(uncovered.map(\.displayName).joined(separator: ", "))"
                           + " — not covered, so nothing will ever alert",
                           systemImage: "shield.slash")
-                        .font(.caption2).foregroundStyle(.orange)
+                        .font(.caption2).foregroundStyle(GlanceStyle.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -906,7 +906,7 @@ private struct StocksHoldingRow: View {
             Text(position.displayName).font(.caption.weight(.semibold))
             if !isPlanned {
                 Image(systemName: "shield.slash")
-                    .font(.system(size: 8)).foregroundStyle(.orange)
+                    .font(GlanceStyle.micro).foregroundStyle(GlanceStyle.warning)
             }
         }
     }
@@ -1043,7 +1043,7 @@ struct StocksHoldingsEditor: View {
                             Image(systemName: "trash")
                         }
                         .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(GlanceStyle.negative)
                     }
                     HStack(spacing: 4) {
                         TextField("Shares", text: $row.shares)
@@ -1077,7 +1077,7 @@ struct StocksHoldingsEditor: View {
 
             if let problem {
                 Label(problem, systemImage: "exclamationmark.triangle")
-                    .font(.caption2).foregroundStyle(.orange)
+                    .font(.caption2).foregroundStyle(GlanceStyle.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -1237,7 +1237,7 @@ struct StocksPlanStatus: View {
                     .controlSize(.small)
                     .buttonStyle(.borderless)
             }
-            .foregroundStyle(.orange)
+            .foregroundStyle(GlanceStyle.warning)
             .padding(.horizontal, 8).padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
@@ -1245,7 +1245,7 @@ struct StocksPlanStatus: View {
             // A plan more than a day old quotes moving averages that have moved.
             Label("Plan dated \(date), not today", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlanceStyle.warning)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1305,7 +1305,7 @@ struct StocksMarketHeader: View {
                 Label("Index below the gate · new-position alerts stopped",
                       systemImage: "exclamationmark.octagon.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(GlanceStyle.negative)
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
@@ -1462,7 +1462,7 @@ struct StocksPlanRowSummary: View {
                 // reads the same wherever it appears.
                 Text(StocksFormat.signedPercent(distance) + " away")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(abs(distance) <= 1 ? AnyShapeStyle(Color.orange)
+                    .foregroundStyle(abs(distance) <= 1 ? AnyShapeStyle(GlanceStyle.warning)
                                                         : AnyShapeStyle(.tertiary))
             } else {
                 Text("No live level").font(.caption2).foregroundStyle(.tertiary)
@@ -1548,11 +1548,11 @@ struct StocksLevelLadder: View {
 
             if status.hasFired {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.caption2).foregroundStyle(.green)
+                    .font(.caption2).foregroundStyle(GlanceStyle.positive)
             } else if status.needsHistory {
                 // This level cannot fire yet. Saying so beats looking armed.
                 Text("needs bars")
-                    .font(.caption2).foregroundStyle(.orange)
+                    .font(.caption2).foregroundStyle(GlanceStyle.warning)
             } else if status.isSuppressedByGate {
                 Image(systemName: "hand.raised.fill")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -1686,7 +1686,7 @@ struct StocksStockDetail: View {
                                         ? StocksFormat.money(band, market: market)
                                         : StocksFormat.price(band, market: market) + "%"))
                                     .font(.caption2)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(GlanceStyle.warning)
                             } else {
                                 Text("\(StocksFormat.levelLabel(alert.levelKind, plan: alert.levelLabel)) \(StocksFormat.price(alert.price, market: market))")
                                     .font(.caption2.weight(.semibold))
@@ -1759,7 +1759,7 @@ struct StocksStockDetail: View {
                         if row.instruction?.isShort == true,
                            let affordable = row.instruction?.affordableShares {
                             Text("Cash covers only \(affordable) sh")
-                                .font(.caption2).foregroundStyle(.orange)
+                                .font(.caption2).foregroundStyle(GlanceStyle.warning)
                         }
                         if let source = row.source {
                             Text(source)
@@ -1794,11 +1794,11 @@ struct StocksStockDetail: View {
                 detailGroup("Position ladder") {
                     if let up = path.up, !up.isEmpty {
                         Text("Up: \(up.joined(separator: " → "))")
-                            .font(.caption2.monospacedDigit()).foregroundStyle(.green)
+                            .font(.caption2.monospacedDigit()).foregroundStyle(GlanceStyle.positive)
                     }
                     if let down = path.down, !down.isEmpty {
                         Text("Down: \(down.joined(separator: " → "))")
-                            .font(.caption2.monospacedDigit()).foregroundStyle(.red)
+                            .font(.caption2.monospacedDigit()).foregroundStyle(GlanceStyle.negative)
                     }
                     if let max = path.max {
                         Text("Cap \(max)").font(.caption2.weight(.medium))

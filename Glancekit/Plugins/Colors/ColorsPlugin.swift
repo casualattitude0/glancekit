@@ -332,7 +332,7 @@ private struct ColorsPopover: View {
         if let err = plugin.lastError {
             Label(err, systemImage: "exclamationmark.triangle")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlanceStyle.warning)
         }
 
         // Current color + hex + actions.
@@ -363,7 +363,7 @@ private struct ColorsPopover: View {
                 plugin.toggleFavorite()
             } label: {
                 Image(systemName: favorites.isFavorite(plugin.selectedHex) ? "star.fill" : "star")
-                    .foregroundStyle(favorites.isFavorite(plugin.selectedHex) ? Color.yellow : Color.secondary)
+                    .foregroundStyle(favorites.isFavorite(plugin.selectedHex) ? GlanceStyle.highlight : Color.secondary)
             }
             .buttonStyle(.plain)
             .help(favorites.isFavorite(plugin.selectedHex) ? "Remove from favorites" : "Add to favorites")

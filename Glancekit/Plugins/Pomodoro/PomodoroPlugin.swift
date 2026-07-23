@@ -122,7 +122,7 @@ private struct PomodoroRing: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(timer.remainingText)
-                    .font(.system(size: 30, weight: .medium).monospacedDigit())
+                    .font(GlanceStyle.hero(30, weight: .medium))
                     .contentTransition(.numericText())
                 Text(timer.isRunning ? "Next: \(timer.nextPhase.title)" : "Paused")
                     .font(.caption2)

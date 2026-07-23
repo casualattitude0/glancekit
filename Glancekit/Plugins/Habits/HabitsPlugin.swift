@@ -528,7 +528,7 @@ private struct HabitsRow: View {
                 } label: {
                     Image(systemName: done ? "checkmark.circle.fill" : "circle")
                         .font(.title2)
-                        .foregroundStyle(done ? Color.green : Color.secondary)
+                        .foregroundStyle(done ? GlanceStyle.positive : Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .frame(width: 26)
@@ -554,7 +554,7 @@ private struct HabitsRow: View {
             if streak > 0 {
                 Text("🔥 \(streak)")
                     .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(restDay ? Color.secondary : Color.orange)
+                    .foregroundStyle(restDay ? Color.secondary : GlanceStyle.warning)
             }
         }
         // Tapping the label area (not the checkbox) opens the history detail.
@@ -712,7 +712,7 @@ private struct HabitsHeatStrip: View {
                     .frame(width: 30, height: 30)
                     .overlay(
                         Text(Self.dayNumFormatter.string(from: day))
-                            .font(.system(size: 9, weight: .medium))
+                            .font(GlanceStyle.mini.weight(.medium))
                             .foregroundStyle(done ? Color.white : Color.secondary)
                     )
                     .opacity(beforeCreation ? 0.25 : (scheduled ? 1 : 0.5))
@@ -730,7 +730,7 @@ private struct HabitsHeatStrip: View {
     private func fill(scheduled: Bool, done: Bool, beforeCreation: Bool) -> Color {
         if beforeCreation { return Color.gray.opacity(0.15) }
         if !scheduled { return Color.gray.opacity(0.12) }
-        return done ? Color.green : Color.gray.opacity(0.28)
+        return done ? GlanceStyle.positive : Color.gray.opacity(0.28)
     }
 }
 
@@ -872,7 +872,7 @@ private struct HabitsSettingsRow: View {
                 confirmDelete = true
             } label: {
                 Image(systemName: "trash")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(GlanceStyle.negative)
             }
             .buttonStyle(.borderless)
             .help("Delete habit")
@@ -919,7 +919,7 @@ private struct HabitsArchivedRow: View {
                 confirmDelete = true
             } label: {
                 Image(systemName: "trash")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(GlanceStyle.negative)
             }
             .buttonStyle(.borderless)
             .help("Delete habit")

@@ -264,7 +264,7 @@ private struct RemindersPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             if plugin.hasNoListsSelected {
@@ -365,7 +365,7 @@ private struct RemindersRow: View {
                     if reminder.priority != 0, reminder.priority <= 5 {
                         Image(systemName: "exclamationmark")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(GlanceStyle.warning)
                     }
                     Text(reminder.title)
                         .font(.body)
@@ -468,7 +468,7 @@ private struct RemindersListPicker: View {
                 if plugin.hasNoListsSelected {
                     Text("No lists selected — the glance will be empty.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(GlanceStyle.warning)
                 }
             }
         }

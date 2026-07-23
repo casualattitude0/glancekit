@@ -541,7 +541,7 @@ private struct NetworkPopover: View {
             // Status header + connection type + manual "Test now".
             HStack(spacing: 6) {
                 Circle()
-                    .fill(plugin.isOnline ? Color.green : Color.red)
+                    .fill(plugin.isOnline ? GlanceStyle.positive : GlanceStyle.negative)
                     .frame(width: 9, height: 9)
                 Text(plugin.connectionType.label)
                     .font(.headline)
@@ -641,7 +641,7 @@ private struct NetworkPopover: View {
                 NetworkRow(label: "VPN", systemImage: "lock.shield") {
                     if let vpn = plugin.vpnInterface {
                         Text("On · \(vpn.name)")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(GlanceStyle.positive)
                     } else {
                         Text("Off").foregroundStyle(.secondary)
                     }
@@ -667,7 +667,7 @@ private struct NetworkPopover: View {
                                 if iface.isVPN {
                                     Image(systemName: "lock.fill")
                                         .font(.caption2)
-                                        .foregroundStyle(.green)
+                                        .foregroundStyle(GlanceStyle.positive)
                                 }
                                 NetworkCopyButton(value: iface.ipv4, help: "Copy \(iface.name) IP")
                                     .font(.caption2)
@@ -720,7 +720,7 @@ private struct NetworkHostList: View {
                             } else {
                                 Text("down")
                                     .font(.caption)
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(GlanceStyle.negative)
                             }
                         } else {
                             Text("—").font(.caption).foregroundStyle(.secondary)
@@ -774,7 +774,7 @@ private struct NetworkBars: View {
         HStack(alignment: .bottom, spacing: 2) {
             ForEach(0..<3, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(i < bars ? Color.green : Color.secondary.opacity(0.3))
+                    .fill(i < bars ? GlanceStyle.positive : Color.secondary.opacity(0.3))
                     .frame(width: 3, height: 5 + CGFloat(i) * 4)
             }
         }

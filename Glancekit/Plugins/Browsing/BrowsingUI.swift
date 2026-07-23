@@ -156,7 +156,7 @@ struct BrowsingPopover: View {
 
     private var pauseBanner: some View {
         HStack(spacing: 6) {
-            Image(systemName: "pause.circle.fill").foregroundStyle(.orange)
+            Image(systemName: "pause.circle.fill").foregroundStyle(GlanceStyle.warning)
             Text(pauseText).font(.caption)
             Spacer(minLength: 4)
             Button("Resume") {
@@ -189,7 +189,7 @@ struct BrowsingPopover: View {
     private var accessBanner: some View {
         let waiting = plugin.browsersAwaitingAccess
         return HStack(spacing: 6) {
-            Image(systemName: "lock.fill").foregroundStyle(.orange)
+            Image(systemName: "lock.fill").foregroundStyle(GlanceStyle.warning)
             Text("Can't read \(waiting.map(\.displayName).joined(separator: ", "))")
                 .font(.caption)
                 .lineLimit(1)
@@ -286,7 +286,7 @@ private struct BrowsingRow: View {
                 .help("Delete")
             } else {
                 if entry.pinned {
-                    Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
+                    Image(systemName: "star.fill").font(.caption2).foregroundStyle(GlanceStyle.highlight)
                 }
                 Text(relativeTime)
                     .font(.caption2)
@@ -489,7 +489,7 @@ struct BrowsingSettings: View {
         switch statuses[browser.bundleID] ?? AutomationPermission.status(for: browser.bundleID) {
         case .granted:
             Label("Allowed", systemImage: "checkmark.circle.fill")
-                .font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon)
+                .font(.caption).foregroundStyle(GlanceStyle.positive).labelStyle(.titleAndIcon)
         case .denied:
             Button("Open System Settings…") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {

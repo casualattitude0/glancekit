@@ -387,7 +387,7 @@ private struct WorldClockClockRow: View {
                         .lineLimit(1)
                     if isHome {
                         Text("HOME")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(GlanceStyle.micro.weight(.bold))
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(.tint.opacity(0.18), in: Capsule())
                             .foregroundStyle(.tint)
@@ -405,7 +405,7 @@ private struct WorldClockClockRow: View {
                         if let marker = dayMarker {
                             Text(marker)
                                 .font(.caption2.weight(.medium))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(GlanceStyle.warning)
                         }
                     }
                 }
@@ -417,7 +417,7 @@ private struct WorldClockClockRow: View {
                 Label("Copied", systemImage: "checkmark")
                     .labelStyle(.titleAndIcon)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(GlanceStyle.positive)
             } else {
                 Text(timeText)
                     .font(.body.monospacedDigit().weight(isHome ? .semibold : .regular))
@@ -534,7 +534,7 @@ private struct WorldClockMeetingPlanner: View {
                     let date = now.addingTimeInterval(TimeInterval(offset) * 3600)
                     let hour = WorldClockPlugin.localHour(for: homeZone, at: date)
                     Text(String(format: "%02d", hour))
-                        .font(.system(size: 8).monospacedDigit())
+                        .font(GlanceStyle.micro.monospacedDigit())
                         .foregroundStyle(highlightColumn == offset ? .primary : .secondary)
                         .frame(maxWidth: .infinity)
                 }
@@ -557,20 +557,20 @@ private struct WorldClockMeetingPlanner: View {
         let marker = WorldClockPlugin.dayMarker(delta: delta)
         return HStack(spacing: 6) {
             Text(zone.displayName)
-                .font(.system(size: 10))
+                .font(GlanceStyle.compact)
                 .lineLimit(1)
                 .frame(width: 90, alignment: .leading)
             Text(refTime)
-                .font(.system(size: 10).monospacedDigit().weight(.medium))
+                .font(GlanceStyle.compact.monospacedDigit().weight(.medium))
             if let marker {
                 Text(marker)
-                    .font(.system(size: 9).weight(.medium))
-                    .foregroundStyle(.orange)
+                    .font(GlanceStyle.mini.weight(.medium))
+                    .foregroundStyle(GlanceStyle.warning)
             }
             Spacer()
             if zone.id != homeZone {
                 Text(WorldClockPlugin.differenceLabel(for: zone.id, relativeTo: homeZone, at: referenceDate))
-                    .font(.system(size: 9).monospacedDigit())
+                    .font(GlanceStyle.mini.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
         }
@@ -579,7 +579,7 @@ private struct WorldClockMeetingPlanner: View {
     private func stripRow(_ zone: WorldClockZone) -> some View {
         HStack(spacing: 2) {
             Text(zone.displayName)
-                .font(.system(size: 9))
+                .font(GlanceStyle.mini)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(width: 52, alignment: .leading)
@@ -594,7 +594,7 @@ private struct WorldClockMeetingPlanner: View {
         let hour = WorldClockPlugin.localHour(for: zone.id, at: date)
         let working = isWorkingHour(hour)
         return RoundedRectangle(cornerRadius: 2)
-            .fill(working ? Color.green.opacity(0.55) : Color.gray.opacity(0.15))
+            .fill(working ? GlanceStyle.positive.opacity(0.55) : Color.gray.opacity(0.15))
             .frame(height: 14)
             .frame(maxWidth: .infinity)
             .overlay(cellOverlay(offset: offset, hour: hour))
@@ -605,7 +605,7 @@ private struct WorldClockMeetingPlanner: View {
         if highlightColumn == offset {
             RoundedRectangle(cornerRadius: 2).stroke(.tint, lineWidth: 1.5)
         } else if hour == 0 {
-            RoundedRectangle(cornerRadius: 2).stroke(.orange.opacity(0.6), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 2).stroke(GlanceStyle.warning.opacity(0.6), lineWidth: 1)
         }
     }
 }
@@ -671,7 +671,7 @@ private struct WorldClockSettings: View {
                                 Text(id).font(.caption2).foregroundStyle(.secondary)
                                 Spacer()
                                 if isAdded(id) {
-                                    Image(systemName: "checkmark").foregroundStyle(.green)
+                                    Image(systemName: "checkmark").foregroundStyle(GlanceStyle.positive)
                                 } else {
                                     Image(systemName: "plus.circle")
                                 }
@@ -707,7 +707,7 @@ private struct WorldClockSettings: View {
                             Spacer()
                             if zone.id == plugin.homeZone {
                                 Text("HOME")
-                                    .font(.system(size: 9, weight: .bold))
+                                    .font(GlanceStyle.mini.weight(.bold))
                                     .foregroundStyle(.tint)
                             } else {
                                 Button("Set home") { plugin.homeZone = zone.id }

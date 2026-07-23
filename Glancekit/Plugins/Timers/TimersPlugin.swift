@@ -660,7 +660,7 @@ private struct TimersRow: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isFinished ? Color.red.opacity(0.12) : Color.secondary.opacity(0.06)))
+                .fill(isFinished ? GlanceStyle.negative.opacity(0.12) : Color.secondary.opacity(0.06)))
         .onReceive(ticker) { now = $0 }
     }
 
@@ -686,7 +686,7 @@ private struct TimersRow: View {
                     }
                 }
                 if isFinished {
-                    Text("Done").font(.caption2).foregroundStyle(.red)
+                    Text("Done").font(.caption2).foregroundStyle(GlanceStyle.negative)
                 } else if item.state == .paused {
                     Text("Paused").font(.caption2).foregroundStyle(.secondary)
                 }

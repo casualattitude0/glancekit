@@ -111,7 +111,7 @@ private struct ShortcutRow: View {
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlanceStyle.warning)
             } else if shortcut == nil {
                 Text("No shortcut set.")
                     .font(.caption)

@@ -272,7 +272,7 @@ private struct QuickSwitchTab: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: plugin.iconSystemName)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.callout.weight(.medium))
                 Text(plugin.title)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)

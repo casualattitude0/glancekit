@@ -301,7 +301,7 @@ private struct NextMeetingPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             if plugin.hasNoCalendarsSelected {
@@ -427,7 +427,7 @@ private struct NextMeetingNextCard: View {
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
-                    urgent ? Color.orange : Color.accentColor,
+                    urgent ? GlanceStyle.warning : Color.accentColor,
                     style: StrokeStyle(lineWidth: 6, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -748,7 +748,7 @@ private struct NextMeetingCalendarPicker: View {
                 if plugin.hasNoCalendarsSelected {
                     Text("No calendars selected — the glance will be empty.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(GlanceStyle.warning)
                 }
             }
         }

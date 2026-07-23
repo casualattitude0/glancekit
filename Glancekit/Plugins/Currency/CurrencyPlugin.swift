@@ -261,7 +261,7 @@ private struct CurrencyPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
             if plugin.rates.isEmpty {
                 Text("No rates yet…")
@@ -333,7 +333,7 @@ private struct CurrencySparkline: View {
                         else { path.addLine(to: CGPoint(x: x, y: y)) }
                     }
                 }
-                .stroke(up ? Color.green : Color.red, lineWidth: 1.5)
+                .stroke(up ? GlanceStyle.positive : GlanceStyle.negative, lineWidth: 1.5)
             } else {
                 Rectangle().fill(.quaternary).frame(height: 1)
                     .frame(maxHeight: .infinity, alignment: .center)
@@ -445,7 +445,7 @@ private struct CurrencySettings: View {
                 Task { await plugin.refresh() }
             } label: { Image(systemName: "minus.circle") }
                 .buttonStyle(.borderless)
-                .foregroundStyle(.red)
+                .foregroundStyle(GlanceStyle.negative)
         }
         .padding(.vertical, 2)
     }

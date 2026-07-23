@@ -256,7 +256,7 @@ private struct SystemStatsPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             let enabled = SystemStatsPlugin.Metric.allCases.filter { plugin.isEnabled($0) }

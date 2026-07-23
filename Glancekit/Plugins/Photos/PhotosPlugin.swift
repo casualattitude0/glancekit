@@ -238,12 +238,12 @@ private struct PhotosSettings: View {
                 switch plugin.photosAuthStatus {
                 case .authorized, .limited:
                     Label("Photos access granted", systemImage: "checkmark.circle")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(GlanceStyle.positive)
                         .font(.caption)
                 case .denied, .restricted:
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Photos access denied.")
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(.caption).foregroundStyle(GlanceStyle.warning)
                         Button("Open System Settings…") {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos") {
                                 NSWorkspace.shared.open(url)

@@ -179,7 +179,7 @@ private struct GitHubPopover: View {
             if plugin.accountData.isEmpty {
                 Label("Add a GitHub account in Settings", systemImage: "person.badge.plus")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             } else {
                 let showLabels = plugin.accountData.count > 1
                 ForEach(Array(plugin.accountData.enumerated()), id: \.element.id) { index, data in
@@ -214,7 +214,7 @@ private struct GitHubAccountSection: View {
             if let err = data.error {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             if let calendar = data.contributions {
@@ -410,11 +410,11 @@ private struct GitHubAccountRow: View {
                 if GitHubAccountStore.hasToken(account) {
                     Label("Token set", systemImage: "checkmark.circle")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(GlanceStyle.positive)
                 } else {
                     Label("No token", systemImage: "exclamationmark.triangle")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(GlanceStyle.warning)
                 }
 
                 Spacer()

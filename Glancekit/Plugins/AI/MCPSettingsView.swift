@@ -200,10 +200,10 @@ private struct MCPServerRow: View {
             ProgressView().controlSize(.small)
         case .connected(let count):
             Label("\(count)", systemImage: "checkmark.circle.fill")
-                .font(.caption2).foregroundStyle(.green).help("\(count) tools available")
+                .font(.caption2).foregroundStyle(GlanceStyle.positive).help("\(count) tools available")
         case .failed(let message):
             Label("Error", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption2).foregroundStyle(.orange).help(message)
+                .font(.caption2).foregroundStyle(GlanceStyle.warning).help(message)
         }
     }
 }

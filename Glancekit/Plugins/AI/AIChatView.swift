@@ -295,7 +295,7 @@ private struct AIErrorBanner: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlanceStyle.warning)
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -325,7 +325,7 @@ private struct AIApprovalBanner: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: request.isMCP ? "network.badge.shield.half.filled" : "hand.raised.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
                 Text(request.isMCP ? "Run external tool?" : "Allow this action?")
                     .font(.caption.weight(.semibold))
             }

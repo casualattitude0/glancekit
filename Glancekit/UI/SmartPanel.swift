@@ -214,14 +214,14 @@ private struct SignalCard: View {
                         .lineLimit(1)
                     if delta.isNew {
                         Text("NEW")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(GlanceStyle.mini.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
                             .background(Color.blue, in: Capsule())
                     } else if delta.changed {
                         Circle()
-                            .fill(.orange)
+                            .fill(GlanceStyle.warning)
                             .frame(width: 5, height: 5)
                             .help("Updated since you last looked")
                     }
@@ -340,7 +340,7 @@ private struct MiniSparkline: View {
                         else { path.addLine(to: CGPoint(x: x, y: y)) }
                     }
                 }
-                .stroke(up ? Color.green : Color.red, lineWidth: 1.5)
+                .stroke(up ? GlanceStyle.positive : GlanceStyle.negative, lineWidth: 1.5)
             } else {
                 Rectangle().fill(.quaternary).frame(height: 1)
                     .frame(maxHeight: .infinity, alignment: .center)

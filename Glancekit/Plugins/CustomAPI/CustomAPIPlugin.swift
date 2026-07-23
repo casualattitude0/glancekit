@@ -113,7 +113,7 @@ private struct CustomAPIPopover: View {
                         } else if let error = result?.error {
                             Text(error)
                                 .font(.caption)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(GlanceStyle.warning)
                                 .lineLimit(1)
                         } else {
                             Text("—")

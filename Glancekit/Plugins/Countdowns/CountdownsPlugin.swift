@@ -273,7 +273,7 @@ private struct CountdownRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: arrived ? "checkmark.seal.fill" : "hourglass")
-                .foregroundStyle(arrived ? Color.green : Color.accentColor)
+                .foregroundStyle(arrived ? GlanceStyle.positive : Color.accentColor)
                 .font(.body)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.label).font(.body).lineLimit(1)

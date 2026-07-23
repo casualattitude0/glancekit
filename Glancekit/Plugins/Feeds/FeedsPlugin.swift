@@ -381,7 +381,7 @@ private struct FeedsPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
             }
 
             header
@@ -569,7 +569,7 @@ private struct FeedsSettings: View {
                     Button("Add feed") { addFeed() }
                         .disabled(newURL.trimmingCharacters(in: .whitespaces).isEmpty)
                     if let addError {
-                        Text(addError).font(.caption).foregroundStyle(.red)
+                        Text(addError).font(.caption).foregroundStyle(GlanceStyle.negative)
                     }
                 }
             }

@@ -499,13 +499,13 @@ private struct StocksPopover: View {
             if let err = plugin.lastError {
                 Label(err, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let planError = plugin.planSource.error {
                 Label(planError, systemImage: "doc.badge.exclamationmark")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GlanceStyle.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -644,10 +644,10 @@ private struct StocksSettings: View {
             }
             if let plan = plugin.planSource.plan {
                 Text("Loaded \(plan.date ?? "?") · \(plan.plans.count) stocks")
-                    .font(.caption).foregroundStyle(.green)
+                    .font(.caption).foregroundStyle(GlanceStyle.positive)
             }
             if let error = plugin.planSource.error {
-                Text(error).font(.caption).foregroundStyle(.orange)
+                Text(error).font(.caption).foregroundStyle(GlanceStyle.warning)
             }
 
             Text("Approach warnings")
@@ -702,7 +702,7 @@ private struct StocksSettings: View {
                     Task { await plugin.refresh() }
                 }
                 if let note = savedNote {
-                    Text(note).font(.caption).foregroundStyle(.green)
+                    Text(note).font(.caption).foregroundStyle(GlanceStyle.positive)
                 }
             }
         }

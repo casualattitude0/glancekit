@@ -531,7 +531,7 @@ private struct ClipboardPopover: View {
 
     private var pauseBanner: some View {
         HStack(spacing: 6) {
-            Image(systemName: "pause.circle.fill").foregroundStyle(.orange)
+            Image(systemName: "pause.circle.fill").foregroundStyle(GlanceStyle.warning)
             Text(pauseText).font(.caption)
             Spacer(minLength: 4)
             Button("Resume") {
@@ -633,7 +633,7 @@ private struct ClipboardRow: View {
                 .help("Delete")
             } else {
                 if entry.pinned {
-                    Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
+                    Image(systemName: "star.fill").font(.caption2).foregroundStyle(GlanceStyle.highlight)
                 }
                 Text(relativeTime)
                     .font(.caption2)
