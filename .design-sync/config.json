@@ -1,0 +1,8 @@
+{
+  "pkg": "@glancekit/design-system",
+  "globalName": "GlancekitDS",
+  "shape": "package",
+  "buildCmd": "cd design-system && COREPACK_ENABLE_STRICT=0 pnpm run build",
+  "cssEntry": "src/styles.css",
+  "readmeHeader": ".design-sync/conventions.md"
+}
